@@ -7,7 +7,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_DIR="${D_AQUILA_INSTALL_DIR:-/opt/d-aquila}"
 PROMETHEUS_URL="${D_AQUILA_PROMETHEUS_URL:-http://localhost:9090}"
 ENABLE_SUBMIT="${D_AQUILA_ENABLE_SUBMIT:-false}"
-EXPORTER_MODE="${D_AQUILA_EXPORTER_MODE:-plan}"
+EXPORTER_MODE="${D_AQUILA_EXPORTER_MODE:-}"
 BUNDLED_PROMETHEUS="${D_AQUILA_BUNDLED_PROMETHEUS:-auto}"
 
 log() {
@@ -22,6 +22,41 @@ die() {
 need_root() {
   if [ "$(id -u)" -ne 0 ]; then
     die "Run as root or with sudo for one-click installation."
+  fi
+}
+
+choose_exporter_mode() {
+  local requested="${1:-}"
+
+  if [ -n "$requested" ]; then
+    EXPORTER_MODE="$requested"
+  fi
+
+  if [ -n "$EXPORTER_MODE" ]; then
+    case "$EXPORTER_MODE" in
+      plan|generate-scripts|deploy) return ;;
+      *) die "Unknown install mode: $EXPORTER_MODE. Use plan, generate-scripts, or deploy." ;;
+    esac
+  fi
+
+  if [ -t 0 ]; then
+    printf '\n'
+    printf 'D-aquila install mode\n'
+    printf '  1) plan             Detect nodes and generate Prometheus targets only\n'
+    printf '  2) generate-scripts Generate reusable remote exporter scripts\n'
+    printf '  3) deploy           SSH deploy exporters to detected nodes\n'
+    printf '\n'
+    printf 'Select mode [1]: '
+    read -r answer
+    case "${answer:-1}" in
+      1|plan) EXPORTER_MODE="plan" ;;
+      2|generate-scripts|scripts) EXPORTER_MODE="generate-scripts" ;;
+      3|deploy) EXPORTER_MODE="deploy" ;;
+      *) die "Unknown install mode selection: $answer" ;;
+    esac
+  else
+    EXPORTER_MODE="plan"
+    log "No interactive terminal detected. Using safe default install mode: plan"
   fi
 }
 
@@ -172,6 +207,7 @@ start_app() {
 
 main() {
   need_root
+  choose_exporter_mode "${1:-}"
   install_docker
   preflight
   install_files

@@ -46,8 +46,21 @@ http://<서버 IP>:8000
 기본 설치는 안전하게 `plan` 모드로 동작합니다. 이 모드는 Slurm 설정에서 노드 목록을 감지하고 Prometheus target 파일과 리포트만 생성합니다. 실제 노드에 exporter를 설치하려면 `deploy` 모드를 사용합니다.
 
 ```bash
-sudo D_AQUILA_EXPORTER_MODE=deploy bash scripts/install.sh
+sudo bash scripts/install.sh
 ```
+
+실행하면 설치 모드 메뉴가 표시됩니다.
+
+```text
+D-aquila install mode
+  1) plan             Detect nodes and generate Prometheus targets only
+  2) generate-scripts Generate reusable remote exporter scripts
+  3) deploy           SSH deploy exporters to detected nodes
+
+Select mode [1]:
+```
+
+노드까지 자동 배포하려면 `3`을 선택합니다.
 
 ## exporter 설치 모드
 
@@ -73,7 +86,7 @@ sudo D_AQUILA_EXPORTER_MODE=deploy bash scripts/install.sh
 `plan` 작업에 더해, 각 노드에서 실행 가능한 exporter 설치 스크립트를 생성합니다.
 
 ```bash
-sudo D_AQUILA_EXPORTER_MODE=generate-scripts bash scripts/install.sh
+sudo bash scripts/install.sh
 ```
 
 결과 파일:
@@ -88,7 +101,7 @@ sudo D_AQUILA_EXPORTER_MODE=generate-scripts bash scripts/install.sh
 마스터 노드에서 SSH로 각 계산 노드에 접속해 exporter를 설치합니다.
 
 ```bash
-sudo D_AQUILA_EXPORTER_MODE=deploy bash scripts/install.sh
+sudo bash scripts/install.sh
 ```
 
 동작:
@@ -100,10 +113,12 @@ sudo D_AQUILA_EXPORTER_MODE=deploy bash scripts/install.sh
 
 기본 SSH 사용자는 `root`입니다. 필요하면 변경할 수 있습니다.
 
+설치 메뉴에서 `3`을 선택하면 이 모드로 실행됩니다.
+
+스크립트 실행 시 인자로 바로 지정할 수도 있습니다.
+
 ```bash
-sudo D_AQUILA_EXPORTER_MODE=deploy \
-  D_AQUILA_EXPORTER_SSH_USER=root \
-  bash scripts/install.sh
+sudo bash scripts/install.sh deploy
 ```
 
 ## 디스크리스 클러스터
@@ -112,7 +127,7 @@ sudo D_AQUILA_EXPORTER_MODE=deploy \
 
 ```bash
 cd /opt/d-aquila
-sudo D_AQUILA_EXPORTER_MODE=deploy bash scripts/install.sh
+sudo bash scripts/install.sh deploy
 ```
 
 이 구조에서는 마스터 노드가 항상 기준점입니다. 노드가 초기화되어도 Slurm 설정을 다시 읽고, 필요한 exporter 환경을 다시 복원합니다.
@@ -130,7 +145,7 @@ sudo bash scripts/install.sh
 노드 exporter까지 다시 배포하려면 다음처럼 실행합니다.
 
 ```bash
-sudo D_AQUILA_EXPORTER_MODE=deploy bash scripts/install.sh
+sudo bash scripts/install.sh deploy
 ```
 
 ## 로그인 방식
