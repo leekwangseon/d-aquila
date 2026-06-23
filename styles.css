@@ -342,6 +342,12 @@ h2 {
   display: block;
 }
 
+.view[data-view-panel="hardware"].active {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
@@ -962,8 +968,9 @@ h2 {
 }
 
 .hardware-layout {
-  height: min(760px, calc(100vh - 142px));
-  min-height: 520px;
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
   gap: 18px;
@@ -2673,6 +2680,7 @@ textarea {
 
   .hardware-layout {
     height: auto;
+    min-height: 0;
   }
 
   .hardware-stage {
