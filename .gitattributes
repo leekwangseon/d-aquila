@@ -5,5 +5,6 @@
 *.py text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+LICENSE text eol=lf
 Dockerfile text eol=lf
 README.md text eol=lf

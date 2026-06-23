@@ -30,6 +30,7 @@ const viewTitles = {
   overview: "운영 개요",
   resources: "리소스 사용량",
   graphs: "그래프 보드",
+  hardware: "하드웨어 랙",
   jobs: "작업 모니터링",
   nodes: "클러스터 노드",
   power: "전력/온도",
@@ -1090,6 +1091,23 @@ function renderGraphBoard(summary, system) {
   renderPowerPulseGraph(summary, system);
 }
 
+function renderHardwareView() {
+  const gpuNodes = latestNodes.filter((node) => Number(node.gpu_total || 0) > 0).length;
+  const warnNodes = latestNodes.filter((node) => ["warn", "down"].includes(nodeHealthType(node))).length;
+  const deviceCount = latestNodes.length || 1;
+  setText("#hardwareDeviceCount", String(deviceCount));
+  setText("#hardwareGpuCount", String(gpuNodes));
+  setText("#hardwareWarnCount", String(warnNodes));
+  setText("#hardwareRackSummary", latestNodes.length ? `${latestNodes.length} nodes mapped into virtual rack` : "단독 서버 1대 기준 가상 랙");
+  if (window.DAquilaHardware3D?.update) {
+    window.DAquilaHardware3D.update({
+      nodes: latestNodes,
+      system: latestSystem,
+      summary: latestSummary
+    });
+  }
+}
+
 function okText(ok) {
   return ok ? "OK" : "확인 필요";
 }
@@ -1279,6 +1297,7 @@ function updateMetrics(summary, system) {
   renderOverviewInsights(summary, system);
   renderPowerInsights(summary, system);
   renderGraphBoard(summary, system);
+  renderHardwareView();
 }
 
 function updateScriptFromForm() {
@@ -1331,7 +1350,12 @@ function switchView(view) {
   });
   viewTitle.textContent = viewTitles[view] || "D-aquila";
   document.querySelector(".main").scrollTop = 0;
+  if (view === "hardware") {
+    requestAnimationFrame(renderHardwareView);
+  }
 }
+
+window.addEventListener("d-aquila-hardware-ready", renderHardwareView);
 
 document.querySelector("#openSubmit").addEventListener("click", () => submitDialog.showModal());
 document.querySelector("#closeSubmit").addEventListener("click", () => submitDialog.close());

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>D-aquila | HPC Operations Platform</title>
-    <link rel="stylesheet" href="./styles.css?v=20260623-graphs1" />
+    <link rel="stylesheet" href="./styles.css?v=20260623-hardware1" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -50,6 +50,10 @@
           <button class="nav-item" type="button" data-view="graphs">
             <span class="icon">G</span>
             <span>그래프</span>
+          </button>
+          <button class="nav-item" type="button" data-view="hardware">
+            <span class="icon">H</span>
+            <span>하드웨어</span>
           </button>
           <button class="nav-item" type="button" data-view="jobs">
             <span class="icon">J</span>
@@ -428,6 +432,50 @@
               </div>
               <div class="pulse-grid" id="powerPulseGraph"></div>
             </article>
+          </section>
+        </section>
+
+        <section class="view" data-view-panel="hardware">
+          <section class="hardware-layout">
+            <div class="hardware-stage" id="hardwareStage">
+              <div class="hardware-overlay">
+                <div>
+                  <strong>3D Rack View</strong>
+                  <span id="hardwareRackSummary">노드 데이터를 기다리는 중</span>
+                </div>
+                <div class="hardware-controls">
+                  <span>Drag rotate</span>
+                  <span>Wheel zoom</span>
+                  <span>Click inspect</span>
+                </div>
+              </div>
+            </div>
+
+            <aside class="hardware-detail">
+              <div class="panel-header compact">
+                <div>
+                  <h2>장비 상세</h2>
+                  <p>가상 랙의 장비를 클릭하면 하드웨어 정보가 표시됩니다.</p>
+                </div>
+              </div>
+              <div class="hardware-selected" id="hardwareSelected">
+                <strong>선택된 장비 없음</strong>
+                <span>랙 안의 서버 오브젝트를 클릭하세요.</span>
+              </div>
+              <div class="hardware-metrics">
+                <div><span>Rack Units</span><strong id="hardwareRackUnits">42U</strong></div>
+                <div><span>Devices</span><strong id="hardwareDeviceCount">-</strong></div>
+                <div><span>GPU Nodes</span><strong id="hardwareGpuCount">-</strong></div>
+                <div><span>Warnings</span><strong id="hardwareWarnCount">-</strong></div>
+              </div>
+              <div class="hardware-legend">
+                <span class="idle">Idle</span>
+                <span class="busy">Allocated/Mixed</span>
+                <span class="gpu">GPU</span>
+                <span class="warn">Drain/Fail</span>
+                <span class="down">Down</span>
+              </div>
+            </aside>
           </section>
         </section>
 
@@ -860,6 +908,7 @@ date</textarea>
       </form>
     </dialog>
 
-    <script src="./app.js?v=20260623-graphs1"></script>
+    <script type="module" src="./hardware3d.js?v=20260623-hardware1"></script>
+    <script src="./app.js?v=20260623-hardware1"></script>
   </body>
 </html>
