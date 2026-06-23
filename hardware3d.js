@@ -16,6 +16,8 @@ const state = {
   currentSystem: {},
   rackMeta: null,
   logoTexture: null,
+  logoCanvas: null,
+  contextGroups: {},
   raf: null,
   zoom: 10.2,
   rotationY: -0.5,
@@ -109,6 +111,7 @@ function initScene() {
 
   state.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
   state.camera.position.set(0.2, 1.15, state.zoom);
+  updateCameraPosition();
   state.camera.lookAt(0, 0, 0);
 
   state.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -129,7 +132,7 @@ function initScene() {
   state.scene.add(fill);
 
   const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(14, 11),
+    new THREE.PlaneGeometry(34, 26),
     new THREE.MeshStandardMaterial({ color: 0xf4f6f8, roughness: 0.82, metalness: 0.02 })
   );
   floor.rotation.x = -Math.PI / 2;
@@ -137,7 +140,7 @@ function initScene() {
   floor.receiveShadow = true;
   state.scene.add(floor);
 
-  const grid = new THREE.GridHelper(14, 28, 0x8c98a3, 0xcfd6dd);
+  const grid = new THREE.GridHelper(34, 48, 0x8c98a3, 0xcfd6dd);
   grid.position.y = -3.045;
   state.scene.add(grid);
 
@@ -155,6 +158,7 @@ function loadLogoTexture() {
   const image = new Image();
   image.onload = () => {
     const crop = cropLogoImage(image);
+    state.logoCanvas = crop;
     state.logoTexture = new THREE.CanvasTexture(crop);
     state.logoTexture.colorSpace = THREE.SRGBColorSpace;
     rebuildRack();
@@ -228,10 +232,17 @@ function bindControls() {
   });
   canvas.addEventListener("wheel", (event) => {
     event.preventDefault();
-    state.zoom = Math.max(6, Math.min(16, state.zoom + event.deltaY * 0.005));
-    state.camera.position.z = state.zoom;
+    state.zoom = Math.max(5.6, Math.min(62, state.zoom + event.deltaY * 0.018));
+    updateCameraPosition();
+    updateContextVisibility();
   }, { passive: false });
   window.addEventListener("resize", resize);
+}
+
+function updateCameraPosition() {
+  if (!state.camera) return;
+  const farRatio = Math.max(0, Math.min(1, (state.zoom - 12) / 46));
+  state.camera.position.set(0.2 + farRatio * 2.8, 1.15 + farRatio * 7.4, state.zoom);
 }
 
 function bindPanelControls() {
@@ -296,6 +307,7 @@ function clearRack() {
     });
   }
   state.devices = [];
+  state.contextGroups = {};
 }
 
 function rebuildRack(selectName = "") {
@@ -321,6 +333,7 @@ function buildRack(nodes) {
   const bottomY = -height / 2 + 0.46;
   state.rackMeta = { width, depth, height, frontZ, unitHeight, bottomY };
 
+  addCampusContext(state.rackGroup, nodes, { width, depth, height });
   addBox(state.rackGroup, [width + 0.28, 0.18, depth + 0.22], [0, height / 2, 0], trimMat);
   addBox(state.rackGroup, [width + 0.28, 0.2, depth + 0.22], [0, -height / 2, 0], trimMat);
   addBox(state.rackGroup, [0.14, height, 0.14], [-width / 2, 0, frontZ], rackMat);
@@ -347,6 +360,7 @@ function buildRack(nodes) {
     createServer(group, node, type, y, serverHeight, width, frontZ, isGpu, { units, startU });
     state.rackGroup.add(group);
   });
+  updateContextVisibility();
 }
 
 function computePlacements(nodes) {
@@ -360,6 +374,177 @@ function computePlacements(nodes) {
     nextU = Math.min(RACK_UNITS, startU + units);
     return { node, units, startU };
   });
+}
+
+function addCampusContext(parent, nodes, rackSize) {
+  const roomGroup = new THREE.Group();
+  roomGroup.name = "room-context";
+  const floorGroup = new THREE.Group();
+  floorGroup.name = "floor-context";
+  const buildingGroup = new THREE.Group();
+  buildingGroup.name = "building-context";
+  parent.add(roomGroup, floorGroup, buildingGroup);
+  state.contextGroups = { roomGroup, floorGroup, buildingGroup };
+
+  addRoomContext(roomGroup, nodes, rackSize);
+  addFloorContext(floorGroup);
+  addBuildingContext(buildingGroup);
+}
+
+function addRoomContext(parent, nodes, rackSize) {
+  const floorMat = createMaterial(0xe7edf3, 0.76, 0.03);
+  const lineMat = createMaterial(0x8ea0af, 0.62, 0.04);
+  const glassMat = createMaterial(0x9cc8d8, 0.42, 0.02, { transparent: true, opacity: 0.32 });
+  const labelMat = createMaterial(0x243443, 0.58, 0.05);
+  const rooms = [
+    { name: "GPU ROOM", x: -5.4, z: -3.8, color: 0x4b62b5 },
+    { name: "CPU ROOM", x: 5.4, z: -3.8, color: 0x0b6f7a },
+    { name: "STORAGE", x: -5.4, z: 4.2, color: 0xe5a423 },
+    { name: "NETWORK", x: 5.4, z: 4.2, color: 0xd95f43 }
+  ];
+
+  rooms.forEach((room, roomIndex) => {
+    addBox(parent, [5.2, 0.035, 4.2], [room.x, -3.025, room.z], floorMat, "room-floor");
+    addBox(parent, [5.2, 0.05, 0.06], [room.x, -2.96, room.z - 2.08], lineMat, "room-wall");
+    addBox(parent, [5.2, 0.05, 0.06], [room.x, -2.96, room.z + 2.08], lineMat, "room-wall");
+    addBox(parent, [0.06, 0.05, 4.2], [room.x - 2.58, -2.96, room.z], lineMat, "room-wall");
+    addBox(parent, [0.06, 0.05, 4.2], [room.x + 2.58, -2.96, room.z], lineMat, "room-wall");
+    addBox(parent, [4.4, 1.15, 0.035], [room.x, -2.42, room.z - 2.1], glassMat, "room-glass");
+    addRoomLabel(parent, room.name, [room.x, -2.86, room.z - 1.55], room.color);
+
+    const rackCount = Math.max(2, Math.min(6, Math.ceil((nodes.length || 4) / 4)));
+    for (let i = 0; i < rackCount; i += 1) {
+      const column = i % 3;
+      const row = Math.floor(i / 3);
+      const x = room.x - 1.55 + column * 1.55;
+      const z = room.z - 0.45 + row * 1.15;
+      addMiniRack(parent, [x, -2.36, z], room.color, roomIndex === 0 && i === 0 ? 1.0 : 0.74);
+    }
+  });
+
+  addBox(parent, [rackSize.width + 0.58, 0.028, rackSize.depth + 0.48], [0, -3.015, 0], createMaterial(0xd9eef0, 0.64, 0.02), "active-rack-pad");
+}
+
+function addMiniRack(parent, position, color, scale = 0.72) {
+  const group = new THREE.Group();
+  group.position.set(...position);
+  group.scale.set(scale, scale, scale);
+  parent.add(group);
+  const rackMat = createMaterial(0x151a1f, 0.4, 0.3);
+  const faceMat = createMaterial(0x9fb0bc, 0.48, 0.14);
+  const accentMat = createMaterial(color, 0.34, 0.08);
+  addBox(group, [0.58, 1.25, 0.82], [0, 0, 0], rackMat, "mini-rack");
+  for (let i = 0; i < 5; i += 1) {
+    addBox(group, [0.46, 0.12, 0.035], [0, -0.42 + i * 0.2, 0.43], faceMat, "mini-server");
+    addBox(group, [0.06, 0.1, 0.045], [-0.17, -0.42 + i * 0.2, 0.455], accentMat, "mini-server-led");
+  }
+}
+
+function addRoomLabel(parent, text, position, color) {
+  const texture = createTextTexture(text, { width: 512, height: 128, background: "rgba(255,255,255,0.92)", color: "#17202a", accent: color });
+  const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.55, 0.38), material);
+  mesh.position.set(...position);
+  mesh.rotation.x = -Math.PI / 2;
+  parent.add(mesh);
+}
+
+function addFloorContext(parent) {
+  const slabMat = createMaterial(0xf5f7fa, 0.8, 0.02);
+  const wallMat = createMaterial(0xcbd5df, 0.68, 0.04);
+  const coreMat = createMaterial(0x213342, 0.5, 0.18);
+  addBox(parent, [18, 0.055, 12], [0, -3.09, 0], slabMat, "floor-plate");
+  addBox(parent, [18, 0.08, 0.08], [0, -3.0, -6], wallMat, "floor-outline");
+  addBox(parent, [18, 0.08, 0.08], [0, -3.0, 6], wallMat, "floor-outline");
+  addBox(parent, [0.08, 0.08, 12], [-9, -3.0, 0], wallMat, "floor-outline");
+  addBox(parent, [0.08, 0.08, 12], [9, -3.0, 0], wallMat, "floor-outline");
+  addBox(parent, [2.2, 0.16, 5.6], [0, -2.9, 0], coreMat, "floor-core");
+  addBox(parent, [0.08, 0.12, 12], [0, -2.88, 0], wallMat, "floor-corridor");
+  addBox(parent, [18, 0.12, 0.08], [0, -2.88, 0], wallMat, "floor-corridor");
+
+  const zones = [
+    ["DATA HALL A", -5.4, -3.2, 0x4b62b5],
+    ["DATA HALL B", 5.4, -3.2, 0x0b6f7a],
+    ["POWER ROOM", -5.4, 3.2, 0xe5a423],
+    ["NOC", 5.4, 3.2, 0xd95f43]
+  ];
+  zones.forEach(([name, x, z, color]) => addRoomLabel(parent, name, [x, -2.82, z], color));
+}
+
+function addBuildingContext(parent) {
+  const baseMat = createMaterial(0x2a3642, 0.48, 0.22);
+  const sideMat = createMaterial(0x1c2630, 0.55, 0.2);
+  const glassMat = createMaterial(0x74aabf, 0.36, 0.06, { transparent: true, opacity: 0.72 });
+  const signMat = createSignMaterial();
+  const building = new THREE.Group();
+  building.position.set(0, 0.2, -12.5);
+  parent.add(building);
+
+  addBox(building, [8.2, 5.4, 3.8], [0, -0.45, 0], baseMat, "cluster-center-building");
+  addBox(building, [8.35, 0.32, 4.0], [0, 2.45, 0], sideMat, "building-roof");
+  addBox(building, [8.5, 0.24, 4.2], [0, -3.2, 0], sideMat, "building-base");
+  for (let floor = 0; floor < 4; floor += 1) {
+    const y = -2.1 + floor * 1.05;
+    for (let i = 0; i < 7; i += 1) {
+      addBox(building, [0.62, 0.38, 0.045], [-3 + i, y, 1.93], glassMat, "building-window");
+    }
+  }
+  addBox(building, [1.2, 1.2, 0.06], [0, -2.55, 1.96], createMaterial(0x0b1117, 0.42, 0.2), "building-door");
+  if (signMat) {
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(6.6, 0.82), signMat);
+    sign.position.set(0, 1.95, 2.015);
+    building.add(sign);
+  }
+}
+
+function createTextTexture(text, options = {}) {
+  const width = options.width || 1024;
+  const height = options.height || 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = options.background || "rgba(255,255,255,0.94)";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = typeof options.accent === "number" ? `#${options.accent.toString(16).padStart(6, "0")}` : "#0b6f7a";
+  ctx.fillRect(0, 0, 18, height);
+  ctx.fillStyle = options.color || "#17202a";
+  ctx.font = "700 58px Arial, sans-serif";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 48, height / 2);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function createSignMaterial() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1400;
+  canvas.height = 260;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#050607";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (state.logoCanvas) {
+    ctx.drawImage(state.logoCanvas, 46, 58, 310, 118);
+  }
+  ctx.fillStyle = "#e7edf3";
+  ctx.font = "700 64px Arial, sans-serif";
+  ctx.textBaseline = "middle";
+  ctx.fillText("DASAN DATA", 385, 98);
+  ctx.fillStyle = "#d95f43";
+  ctx.font = "700 52px Arial, sans-serif";
+  ctx.fillText("CLUSTER CENTER", 385, 166);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, toneMapped: false });
+}
+
+function updateContextVisibility() {
+  const { roomGroup, floorGroup, buildingGroup } = state.contextGroups || {};
+  if (!roomGroup || !floorGroup || !buildingGroup) return;
+  roomGroup.visible = state.zoom >= 13.5;
+  floorGroup.visible = state.zoom >= 25;
+  buildingGroup.visible = state.zoom >= 40;
 }
 
 function addRackUnitTicks(parent, width, height, frontZ, unitHeight, bottomY) {
