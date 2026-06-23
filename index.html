@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>D-aquila | HPC Operations Platform</title>
-    <link rel="stylesheet" href="./styles.css?v=20260623-resource2" />
+    <link rel="stylesheet" href="./styles.css?v=20260623-graphs1" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -46,6 +46,10 @@
           <button class="nav-item" type="button" data-view="resources">
             <span class="icon">R</span>
             <span>리소스</span>
+          </button>
+          <button class="nav-item" type="button" data-view="graphs">
+            <span class="icon">G</span>
+            <span>그래프</span>
           </button>
           <button class="nav-item" type="button" data-view="jobs">
             <span class="icon">J</span>
@@ -352,6 +356,77 @@
                 <div><span>압력</span><strong id="loadChartPressure">-</strong></div>
               </div>
               <canvas class="load-chart" id="loadChart" width="640" height="180"></canvas>
+            </article>
+          </section>
+        </section>
+
+        <section class="view" data-view-panel="graphs">
+          <section class="graph-board">
+            <article class="panel graph-hero-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>리소스 플로우</h2>
+                  <p>CPU, 메모리, 디스크, 네트워크 변화량을 선형 그래프로 표시합니다.</p>
+                </div>
+                <span class="badge soft">Live</span>
+              </div>
+              <canvas class="graph-line-chart" id="resourceFlowChart" width="900" height="260"></canvas>
+              <div class="graph-legend">
+                <span class="cpu">CPU</span>
+                <span class="memory">Memory</span>
+                <span class="disk">Disk</span>
+                <span class="network">Network</span>
+              </div>
+            </article>
+
+            <article class="panel graph-radial-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>현재 자원 링</h2>
+                  <p>핵심 사용률을 원형 게이지로 비교합니다.</p>
+                </div>
+              </div>
+              <div class="radial-grid" id="graphRadials"></div>
+            </article>
+
+            <article class="panel graph-dot-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>노드 상태 도트</h2>
+                  <p>Slurm 노드 상태를 점 단위로 압축해 봅니다.</p>
+                </div>
+              </div>
+              <div class="dot-matrix" id="nodeDotMatrix"></div>
+            </article>
+
+            <article class="panel graph-square-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>자원 히트 스퀘어</h2>
+                  <p>사용률 구간을 작은 사각형으로 표현합니다.</p>
+                </div>
+              </div>
+              <div class="square-heatmap" id="resourceHeatmap"></div>
+            </article>
+
+            <article class="panel graph-bar-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>작업 큐 분포</h2>
+                  <p>실행, 대기, 실패, 완료 작업을 막대형 그래프로 표시합니다.</p>
+                </div>
+              </div>
+              <div class="distribution-bars" id="jobDistributionGraph"></div>
+            </article>
+
+            <article class="panel graph-pulse-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>전력/온도 펄스</h2>
+                  <p>온도와 전력 신호를 카드형 미터로 요약합니다.</p>
+                </div>
+              </div>
+              <div class="pulse-grid" id="powerPulseGraph"></div>
             </article>
           </section>
         </section>
@@ -785,6 +860,6 @@ date</textarea>
       </form>
     </dialog>
 
-    <script src="./app.js?v=20260623-resource2"></script>
+    <script src="./app.js?v=20260623-graphs1"></script>
   </body>
 </html>

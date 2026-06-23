@@ -9,6 +9,7 @@ let latestSystem = null;
 let latestDiscovery = null;
 let loadHistory = [];
 let powerHistory = [];
+let graphHistory = [];
 let refreshTimer = null;
 
 const loginScreen = document.querySelector("#loginScreen");
@@ -28,6 +29,7 @@ const filesystemList = document.querySelector("#filesystemList");
 const viewTitles = {
   overview: "운영 개요",
   resources: "리소스 사용량",
+  graphs: "그래프 보드",
   jobs: "작업 모니터링",
   nodes: "클러스터 노드",
   power: "전력/온도",
@@ -581,6 +583,45 @@ function drawPowerChart(values = []) {
   drawLineChart(canvas, values, "#6957c8", "GPU power W", maxValue);
 }
 
+function drawMultiLineChart(canvas, seriesMap) {
+  if (!canvas) return;
+  const { ctx, width, height } = prepareCanvas(canvas);
+  const padding = { top: 16, right: 18, bottom: 22, left: 26 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const keys = Object.keys(seriesMap);
+  const maxLength = Math.max(...keys.map((key) => seriesMap[key].values.length), 1);
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#f8fafc";
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = "#d7dde6";
+  ctx.lineWidth = 1;
+
+  for (let i = 0; i <= 4; i += 1) {
+    const y = padding.top + (plotHeight / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(width - padding.right, y);
+    ctx.stroke();
+  }
+
+  keys.forEach((key) => {
+    const item = seriesMap[key];
+    const values = item.values.length ? item.values : [0];
+    ctx.beginPath();
+    values.forEach((value, index) => {
+      const x = padding.left + (index / Math.max(maxLength - 1, 1)) * plotWidth;
+      const y = padding.top + plotHeight - (Math.max(0, Math.min(100, value)) / 100) * plotHeight;
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = item.color;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  });
+}
+
 function drawLoadChart(system) {
   const canvas = document.querySelector("#loadChart");
   if (!canvas) return;
@@ -909,6 +950,146 @@ function renderPowerInsights(summary, system) {
   drawPowerChart(powerHistory.map((sample) => sample.power));
 }
 
+function clampPercent(value) {
+  return Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+}
+
+function renderGraphRadials(values) {
+  const container = document.querySelector("#graphRadials");
+  if (!container) return;
+  const items = [
+    ["CPU", values.cpu, "cpu"],
+    ["Memory", values.memory, "memory"],
+    ["Disk", values.disk, "disk"],
+    ["GPU", values.gpu, "gpu"]
+  ];
+  container.innerHTML = items.map(([label, value, type]) => {
+    const pct = clampPercent(value);
+    const display = pct > 0 || type !== "gpu" ? `${Math.round(pct)}%` : "N/A";
+    return `
+      <div class="graph-ring ${type}" style="--ring-pct: ${pct}">
+        <strong>${display}</strong>
+        <span>${label}</span>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderNodeDotMatrix() {
+  const container = document.querySelector("#nodeDotMatrix");
+  if (!container) return;
+  if (!latestNodes.length) {
+    renderEmptyInline("#nodeDotMatrix", "노드 데이터 없음", "Slurm 노드가 연결되면 도트 그래프가 표시됩니다.");
+    return;
+  }
+  container.innerHTML = latestNodes.slice(0, 120).map((node) => {
+    const type = nodeHealthType(node);
+    const cpuPct = Number(node.cpu_total) ? Math.round((Number(node.cpu_alloc || 0) / Number(node.cpu_total)) * 100) : 0;
+    return `<span class="dot ${type}" title="${escapeHtml(node.name || "-")} · ${escapeHtml(node.state || "-")} · CPU ${cpuPct}%"></span>`;
+  }).join("");
+}
+
+function renderResourceHeatmap(values) {
+  const container = document.querySelector("#resourceHeatmap");
+  if (!container) return;
+  const rows = [
+    ["CPU", values.cpu, "cpu"],
+    ["Memory", values.memory, "memory"],
+    ["Disk", values.disk, "disk"],
+    ["GPU", values.gpu, "gpu"]
+  ];
+  container.innerHTML = rows.map(([label, value, type]) => {
+    const pct = clampPercent(value);
+    const filled = Math.round(pct / 5);
+    const cells = Array.from({ length: 20 }, (_, index) => `<span class="${index < filled ? "on" : ""}"></span>`).join("");
+    const display = pct > 0 || type !== "gpu" ? `${Math.round(pct)}%` : "N/A";
+    return `
+      <div class="heat-row ${type}">
+        <strong>${label}</strong>
+        <div>${cells}</div>
+        <b>${display}</b>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderJobDistributionGraph() {
+  const container = document.querySelector("#jobDistributionGraph");
+  if (!container) return;
+  const total = Math.max(jobs.length, 1);
+  const items = [
+    ["실행", jobs.filter((job) => jobStatusType(job.status) === "running").length, "running"],
+    ["대기", jobs.filter((job) => jobStatusType(job.status) === "pending").length, "pending"],
+    ["실패", jobs.filter((job) => jobStatusType(job.status) === "failed").length, "failed"],
+    ["완료", jobs.filter((job) => jobStatusType(job.status) === "completed").length, "completed"]
+  ];
+  if (!jobs.length) {
+    renderEmptyInline("#jobDistributionGraph", "작업 데이터 없음", "Slurm squeue가 연결되면 작업 큐 분포가 표시됩니다.");
+    return;
+  }
+  container.innerHTML = items.map(([label, value, type]) => {
+    const pct = Math.round((value / total) * 100);
+    return `
+      <div class="dist-row ${type}">
+        <span>${label}</span>
+        <div><i style="width: ${pct}%"></i></div>
+        <strong>${value}</strong>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderPowerPulseGraph(summary, system) {
+  const container = document.querySelector("#powerPulseGraph");
+  if (!container) return;
+  const gpuTemp = Number(summary?.max_gpu_temp_celsius || 0);
+  const gpuPower = Number(summary?.gpu_power_watts || 0);
+  const serverTemp = Number(system?.temperature?.max_celsius || 0);
+  const maxTemp = Math.max(gpuTemp, serverTemp);
+  const items = [
+    ["GPU Temp", gpuTemp > 0 ? `${Math.round(gpuTemp)}°C` : "N/A", clampPercent(gpuTemp), "temp"],
+    ["Server Temp", serverTemp > 0 ? `${Math.round(serverTemp)}°C` : "N/A", clampPercent(serverTemp), "server"],
+    ["GPU Power", gpuPower > 0 ? `${Math.round(gpuPower)} W` : "N/A", clampPercent((gpuPower / 500) * 100), "power"],
+    ["Thermal Headroom", maxTemp > 0 ? `${Math.max(0, 85 - Math.round(maxTemp))}°C` : "N/A", clampPercent(maxTemp ? 100 - ((maxTemp / 85) * 100) : 0), "headroom"]
+  ];
+  container.innerHTML = items.map(([label, value, pct, type]) => `
+    <div class="pulse-card ${type}">
+      <span>${label}</span>
+      <strong>${value}</strong>
+      <div class="pulse-meter"><i style="width: ${pct}%"></i></div>
+    </div>
+  `).join("");
+}
+
+function renderGraphBoard(summary, system) {
+  const cpu = Number(system?.cpu?.usage_percent ?? summary?.cpu_usage_percent);
+  const memory = Number(system?.memory?.usage_percent);
+  const disk = Number(system?.disk?.usage_percent);
+  const gpu = Number(summary?.gpu_usage_percent || 0);
+  const netRate = Number(system?.network?.rx_bytes_per_sec ?? 0) + Number(system?.network?.tx_bytes_per_sec ?? 0);
+  const netPct = clampPercent((netRate / (125 * 1024 * 1024)) * 100);
+
+  graphHistory.push({
+    cpu: clampPercent(cpu),
+    memory: clampPercent(memory),
+    disk: clampPercent(disk),
+    network: netPct
+  });
+  graphHistory = graphHistory.slice(-36);
+
+  drawMultiLineChart(document.querySelector("#resourceFlowChart"), {
+    cpu: { color: "#0b6f7a", values: graphHistory.map((sample) => sample.cpu) },
+    memory: { color: "#1f9d68", values: graphHistory.map((sample) => sample.memory) },
+    disk: { color: "#e5a423", values: graphHistory.map((sample) => sample.disk) },
+    network: { color: "#2478c8", values: graphHistory.map((sample) => sample.network) }
+  });
+  renderGraphRadials({ cpu, memory, disk, gpu });
+  renderNodeDotMatrix();
+  renderResourceHeatmap({ cpu, memory, disk, gpu });
+  renderJobDistributionGraph();
+  renderPowerPulseGraph(summary, system);
+}
+
 function okText(ok) {
   return ok ? "OK" : "확인 필요";
 }
@@ -1097,6 +1278,7 @@ function updateMetrics(summary, system) {
   renderFilesystems(system?.filesystems || []);
   renderOverviewInsights(summary, system);
   renderPowerInsights(summary, system);
+  renderGraphBoard(summary, system);
 }
 
 function updateScriptFromForm() {
