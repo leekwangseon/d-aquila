@@ -173,6 +173,26 @@ def run_command(args: list[str]) -> str:
     return proc.stdout
 
 
+def run_command_optional(args: list[str], timeout: int | None = None) -> tuple[str, str | None]:
+    try:
+        proc = subprocess.run(
+            args,
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=timeout or COMMAND_TIMEOUT,
+        )
+    except FileNotFoundError:
+        return "", f"Command not found: {args[0]}"
+    except subprocess.TimeoutExpired:
+        return "", f"Command timed out: {' '.join(args)}"
+
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or f"exit code {proc.returncode}"
+        return proc.stdout or "", detail
+    return proc.stdout, None
+
+
 def prometheus(path: str, params: dict[str, str] | None = None) -> Any:
     query = urllib.parse.urlencode(params or {})
     url = f"{PROMETHEUS_URL}{path}"
@@ -323,6 +343,156 @@ def parse_gres_total(gres: str) -> int:
         return 0
     match = re.search(r"gpu(?::[^:,\s]+)?:(\d+)", gres)
     return int(match.group(1)) if match else 0
+
+
+def classify_log(message: str, unit: str = "", source: str = "", priority: int | None = None) -> tuple[str, str]:
+    text = f"{unit} {source} {message}".lower()
+    if priority is not None and priority <= 3:
+        level = "error"
+    elif priority is not None and priority == 4:
+        level = "warn"
+    elif any(word in text for word in ["failed", "failure", "error", "critical", "panic", "segfault", "denied"]):
+        level = "error"
+    elif any(word in text for word in ["warning", "warn", "degraded", "timeout", "retry"]):
+        level = "warn"
+    else:
+        level = "info"
+
+    if any(word in text for word in ["sshd", "sudo", "pam", "authentication", "session", "password", "invalid user", "failed password", "firewalld", "audit"]):
+        category = "security"
+    elif any(word in text for word in ["kernel", "mce", "edac", "thermal", "temperature", "nvidia", "gpu", "ipmi", "hardware", "pcie", "nvme", "disk", "smart"]):
+        category = "hardware"
+    elif any(word in text for word in ["slurm", "slurmd", "slurmctld", "munge", "prometheus", "docker", "containerd", "d-aquila"]):
+        category = "service"
+    else:
+        category = "system"
+    return category, level
+
+
+def log_time_from_journal(item: dict[str, Any]) -> str:
+    raw = item.get("__REALTIME_TIMESTAMP")
+    try:
+        if raw:
+            return datetime.fromtimestamp(int(raw) / 1_000_000).isoformat(timespec="seconds")
+    except (TypeError, ValueError, OSError):
+        pass
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def read_journal_logs(limit: int) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    logs: list[dict[str, Any]] = []
+    sources: list[dict[str, str]] = []
+    commands = [
+        ("system", ["journalctl", "-n", str(limit), "--no-pager", "-o", "json"]),
+        ("kernel", ["journalctl", "-k", "-n", str(max(20, limit // 3)), "--no-pager", "-o", "json"]),
+        ("security", ["journalctl", "-n", str(max(20, limit // 3)), "--no-pager", "-o", "json", "-u", "sshd", "-u", "sudo", "-u", "firewalld"]),
+        ("service", ["journalctl", "-n", str(max(20, limit // 3)), "--no-pager", "-o", "json", "-u", "slurmctld", "-u", "slurmd", "-u", "munge", "-u", "docker", "-u", "d-aquila"]),
+    ]
+    seen: set[tuple[str, str, str]] = set()
+
+    for source_name, command in commands:
+        output, error = run_command_optional(command, timeout=4)
+        sources.append({"name": source_name, "type": "journalctl", "status": "limited" if error else "ok", "detail": error or "journalctl"})
+        if error:
+            continue
+        for line in output.splitlines():
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            message = str(item.get("MESSAGE", "")).strip()
+            if not message:
+                continue
+            unit = str(item.get("_SYSTEMD_UNIT") or item.get("SYSLOG_IDENTIFIER") or "")
+            source = str(item.get("SYSLOG_IDENTIFIER") or source_name)
+            try:
+                priority = int(item.get("PRIORITY")) if item.get("PRIORITY") is not None else None
+            except ValueError:
+                priority = None
+            key = (log_time_from_journal(item), source, message)
+            if key in seen:
+                continue
+            seen.add(key)
+            category, level = classify_log(message, unit, source, priority)
+            logs.append(
+                {
+                    "time": key[0],
+                    "source": source,
+                    "unit": unit,
+                    "category": category,
+                    "level": level,
+                    "priority": priority,
+                    "message": message[:2000],
+                }
+            )
+    return logs, sources
+
+
+def read_file_tail(path: Path, max_lines: int = 80) -> tuple[list[str], str | None]:
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            return handle.readlines()[-max_lines:], None
+    except OSError as exc:
+        return [], str(exc)
+
+
+def read_file_logs(limit: int) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    candidates = [
+        ("messages", Path("/host/var/log/messages")),
+        ("syslog", Path("/host/var/log/syslog")),
+        ("secure", Path("/host/var/log/secure")),
+        ("auth", Path("/host/var/log/auth.log")),
+        ("kern", Path("/host/var/log/kern.log")),
+        ("dmesg", Path("/host/var/log/dmesg")),
+    ]
+    logs: list[dict[str, Any]] = []
+    sources: list[dict[str, str]] = []
+    per_file = max(20, limit // max(len(candidates), 1))
+    now = datetime.now().isoformat(timespec="seconds")
+
+    for name, path in candidates:
+        if not path.exists():
+            sources.append({"name": name, "type": "file", "status": "missing", "detail": str(path)})
+            continue
+        lines, error = read_file_tail(path, per_file)
+        sources.append({"name": name, "type": "file", "status": "limited" if error else "ok", "detail": error or str(path)})
+        for line in lines:
+            message = line.strip()
+            if not message:
+                continue
+            category, level = classify_log(message, source=name)
+            logs.append(
+                {
+                    "time": now,
+                    "source": name,
+                    "unit": "",
+                    "category": category,
+                    "level": level,
+                    "priority": None,
+                    "message": message[:2000],
+                }
+            )
+    return logs, sources
+
+
+def log_summary(logs: list[dict[str, Any]], sources: list[dict[str, str]]) -> dict[str, Any]:
+    by_category: dict[str, int] = {}
+    by_level: dict[str, int] = {}
+    for item in logs:
+        by_category[item["category"]] = by_category.get(item["category"], 0) + 1
+        by_level[item["level"]] = by_level.get(item["level"], 0) + 1
+    return {
+        "total": len(logs),
+        "error": by_level.get("error", 0),
+        "warn": by_level.get("warn", 0),
+        "info": by_level.get("info", 0),
+        "security": by_category.get("security", 0),
+        "hardware": by_category.get("hardware", 0),
+        "system": by_category.get("system", 0),
+        "service": by_category.get("service", 0),
+        "sources_ok": sum(1 for source in sources if source["status"] == "ok"),
+        "sources_limited": sum(1 for source in sources if source["status"] != "ok"),
+    }
 
 
 @app.get("/api/health")
@@ -493,6 +663,24 @@ def targets() -> dict[str, Any]:
             }
             for target in active
         ]
+    }
+
+
+@app.get("/api/logs")
+def logs(limit: int = 180) -> dict[str, Any]:
+    safe_limit = max(20, min(limit, 500))
+    journal_logs, journal_sources = read_journal_logs(safe_limit)
+    file_logs, file_sources = read_file_logs(safe_limit)
+    combined = journal_logs + file_logs
+    combined.sort(key=lambda item: item.get("time", ""), reverse=True)
+    combined = combined[:safe_limit]
+    sources = journal_sources + file_sources
+    return {
+        "logs": combined,
+        "summary": log_summary(combined, sources),
+        "sources": sources,
+        "host": socket.gethostname(),
+        "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
     }
 
 

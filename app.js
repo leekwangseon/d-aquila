@@ -7,6 +7,7 @@ let latestTargets = [];
 let latestSummary = null;
 let latestSystem = null;
 let latestDiscovery = null;
+let latestLogs = null;
 let loadHistory = [];
 let powerHistory = [];
 let graphHistory = [];
@@ -34,6 +35,7 @@ const viewTitles = {
   jobs: "작업 모니터링",
   nodes: "클러스터 노드",
   power: "전력/온도",
+  logs: "로그 관제",
   settings: "설정 / 연결 진단"
 };
 
@@ -1108,6 +1110,113 @@ function renderHardwareView() {
   }
 }
 
+function logLevelLabel(level) {
+  if (level === "error") return "오류";
+  if (level === "warn") return "경고";
+  return "정보";
+}
+
+function logCategoryLabel(category) {
+  const labels = {
+    system: "시스템",
+    security: "보안",
+    hardware: "하드웨어",
+    service: "서비스"
+  };
+  return labels[category] || category || "기타";
+}
+
+function formatLogTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("ko-KR", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
+}
+
+function renderLogItem(log, compact = false) {
+  const level = log.level || "info";
+  const category = log.category || "system";
+  const source = [log.source, log.unit].filter(Boolean).join(" / ") || "-";
+  return `
+    <div class="log-item ${level} ${category}">
+      <span class="log-dot"></span>
+      <div class="log-body">
+        <div class="log-meta">
+          <strong>${escapeHtml(logCategoryLabel(category))}</strong>
+          <span>${escapeHtml(logLevelLabel(level))}</span>
+          <time>${escapeHtml(formatLogTime(log.time))}</time>
+        </div>
+        <p>${escapeHtml(log.message || "-")}</p>
+        ${compact ? "" : `<small>${escapeHtml(source)}</small>`}
+      </div>
+    </div>
+  `;
+}
+
+function renderLogFocus(selector, logs, emptyText) {
+  const target = document.querySelector(selector);
+  if (!target) return;
+  const visible = logs.slice(0, 5);
+  target.innerHTML = visible.length
+    ? visible.map((log) => renderLogItem(log, true)).join("")
+    : `<div class="empty-inline"><strong>표시할 로그 없음</strong><span>${escapeHtml(emptyText)}</span></div>`;
+}
+
+function renderLogSources(sources = []) {
+  const target = document.querySelector("#logSourceList");
+  if (!target) return;
+  target.innerHTML = sources.length
+    ? sources.map((source) => `
+        <div class="log-source ${source.status}">
+          <span></span>
+          <div>
+            <strong>${escapeHtml(source.name || "-")}</strong>
+            <small>${escapeHtml(source.type || "-")} · ${escapeHtml(source.detail || source.status || "-")}</small>
+          </div>
+        </div>
+      `).join("")
+    : `<div class="empty-inline"><strong>로그 소스 없음</strong><span>journalctl 또는 /var/log 접근 권한을 확인하세요.</span></div>`;
+}
+
+function renderLogs() {
+  const data = latestLogs || {};
+  const summary = data.summary || {};
+  const logs = data.logs || [];
+  const categoryFilter = document.querySelector("#logCategoryFilter")?.value || "all";
+  const levelFilter = document.querySelector("#logLevelFilter")?.value || "all";
+  const visible = logs.filter((log) => {
+    const categoryOk = categoryFilter === "all" || log.category === categoryFilter;
+    const levelOk = levelFilter === "all" || log.level === levelFilter;
+    return categoryOk && levelOk;
+  });
+
+  setText("#logTotalMetric", String(summary.total ?? logs.length ?? 0));
+  setText("#logErrorMetric", String(summary.error ?? 0));
+  setText("#logWarnMetric", String(summary.warn ?? 0));
+  setText("#logSecurityMetric", String(summary.security ?? logs.filter((log) => log.category === "security").length));
+  setText("#logHardwareMetric", String(summary.hardware ?? logs.filter((log) => log.category === "hardware").length));
+  setText("#logSourceMetric", `${summary.sources_ok ?? 0}/${(summary.sources_ok ?? 0) + (summary.sources_limited ?? 0)}`);
+  setText("#logSourceDetail", `${summary.sources_limited ?? 0} limited · ${formatDateShort(data.generated_at)}`);
+  setText("#logHostMetric", data.host || "master server");
+
+  const timeline = document.querySelector("#logTimeline");
+  if (timeline) {
+    timeline.innerHTML = visible.length
+      ? visible.slice(0, 160).map((log) => renderLogItem(log)).join("")
+      : `<div class="empty-state"><strong>조건에 맞는 로그 없음</strong><span>필터를 바꾸거나 새로고침을 눌러 다시 확인하세요.</span></div>`;
+  }
+
+  renderLogFocus("#securityLogList", logs.filter((log) => log.category === "security"), "SSH, sudo, PAM 이벤트가 감지되면 표시됩니다.");
+  renderLogFocus("#hardwareLogList", logs.filter((log) => log.category === "hardware"), "커널, 디스크, GPU, 센서 이벤트가 감지되면 표시됩니다.");
+  renderLogSources(data.sources || []);
+}
+
 function okText(ok) {
   return ok ? "OK" : "확인 필요";
 }
@@ -1316,18 +1425,20 @@ ${body}`;
 }
 
 async function refreshData() {
-  const [summary, system, nodeData, jobData, targetData, discoveryData] = await Promise.all([
+  const [summary, system, nodeData, jobData, targetData, discoveryData, logData] = await Promise.all([
     loadOptional("/api/summary", {}),
     loadOptional("/api/system", {}),
     loadOptional("/api/nodes", { nodes: [] }),
     loadOptional("/api/jobs", { jobs: [] }),
     loadOptional("/api/targets", { targets: [] }),
-    loadOptional("/api/discovery", {})
+    loadOptional("/api/discovery", {}),
+    loadOptional("/api/logs?limit=220", { logs: [], summary: {}, sources: [] })
   ]);
 
   latestSummary = summary.unavailable ? null : summary;
   latestSystem = system.unavailable ? null : system;
   latestDiscovery = discoveryData.unavailable ? null : discoveryData;
+  latestLogs = logData.unavailable ? { logs: [], summary: {}, sources: [], error: logData.error } : logData;
   latestNodes = nodeData.nodes || [];
   latestTargets = targetData.targets || [];
   jobs = jobData.jobs || [];
@@ -1339,8 +1450,9 @@ async function refreshData() {
   renderJobs(searchInput.value);
   renderAlerts();
   renderSettings(latestDiscovery);
+  renderLogs();
 
-  const connected = !summary.unavailable || !system.unavailable || !nodeData.unavailable || !jobData.unavailable || !targetData.unavailable || !discoveryData.unavailable;
+  const connected = !summary.unavailable || !system.unavailable || !nodeData.unavailable || !jobData.unavailable || !targetData.unavailable || !discoveryData.unavailable || !logData.unavailable;
   setApiState(connected ? "Live API" : "No API", connected);
 }
 
@@ -1390,6 +1502,13 @@ document.querySelector("#refreshJobs").addEventListener("click", async () => {
 document.querySelector("#refreshSettings")?.addEventListener("click", async () => {
   await refreshData();
 });
+
+document.querySelector("#refreshLogs")?.addEventListener("click", async () => {
+  await refreshData();
+});
+
+document.querySelector("#logCategoryFilter")?.addEventListener("change", renderLogs);
+document.querySelector("#logLevelFilter")?.addEventListener("change", renderLogs);
 
 document.querySelectorAll(".segmented button").forEach((button) => {
   button.addEventListener("click", () => {

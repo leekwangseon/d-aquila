@@ -36,6 +36,9 @@ services:
       - /etc/pam.d:/etc/pam.d:ro
       - /etc/nsswitch.conf:/etc/nsswitch.conf:ro
       - /sys:/sys:ro
+      - /var/log:/var/log:ro
+      - /run/log/journal:/run/log/journal:ro
+      - /var/log/journal:/var/log/journal:ro
       - /etc/slurm:/etc/slurm:ro
       - /etc/slurm-llnl:/etc/slurm-llnl:ro
       - /run/munge:/run/munge:ro
