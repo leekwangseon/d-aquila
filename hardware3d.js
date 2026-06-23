@@ -241,8 +241,8 @@ function bindControls() {
 
 function updateCameraPosition() {
   if (!state.camera) return;
-  const farRatio = Math.max(0, Math.min(1, (state.zoom - 12) / 46));
-  state.camera.position.set(0.2 + farRatio * 2.8, 1.15 + farRatio * 7.4, state.zoom);
+  const farRatio = Math.max(0, Math.min(1, (state.zoom - 10.5) / 48));
+  state.camera.position.set(0.2 + farRatio * 2.2, 1.15 + farRatio * 8.8, state.zoom);
 }
 
 function bindPanelControls() {
@@ -334,20 +334,25 @@ function buildRack(nodes) {
   state.rackMeta = { width, depth, height, frontZ, unitHeight, bottomY };
 
   addCampusContext(state.rackGroup, nodes, { width, depth, height });
-  addBox(state.rackGroup, [width + 0.28, 0.18, depth + 0.22], [0, height / 2, 0], trimMat);
-  addBox(state.rackGroup, [width + 0.28, 0.2, depth + 0.22], [0, -height / 2, 0], trimMat);
-  addBox(state.rackGroup, [0.14, height, 0.14], [-width / 2, 0, frontZ], rackMat);
-  addBox(state.rackGroup, [0.14, height, 0.14], [width / 2, 0, frontZ], rackMat);
-  addBox(state.rackGroup, [0.18, height, depth], [-width / 2, 0, 0], sideMat);
-  addBox(state.rackGroup, [0.18, height, depth], [width / 2, 0, 0], sideMat);
-  addBox(state.rackGroup, [width, height, 0.16], [0, 0, -depth / 2], sideMat);
-  addBox(state.rackGroup, [0.045, height - 0.46, 0.08], [-width / 2 + 0.18, 0, frontZ + 0.05], railMat);
-  addBox(state.rackGroup, [0.045, height - 0.46, 0.08], [width / 2 - 0.18, 0, frontZ + 0.05], railMat);
-  addRackUnitTicks(state.rackGroup, width, height, frontZ, unitHeight, bottomY);
-  addSideVents(state.rackGroup, width, depth, height);
-  addSideLogos(state.rackGroup, width, height);
-  addRearPdu(state.rackGroup, width, depth, height);
-  addWheels(state.rackGroup, width, depth, height);
+  const activeRackGroup = new THREE.Group();
+  activeRackGroup.name = "active-rack-detail";
+  state.rackGroup.add(activeRackGroup);
+  state.contextGroups.activeRackGroup = activeRackGroup;
+
+  addBox(activeRackGroup, [width + 0.28, 0.18, depth + 0.22], [0, height / 2, 0], trimMat);
+  addBox(activeRackGroup, [width + 0.28, 0.2, depth + 0.22], [0, -height / 2, 0], trimMat);
+  addBox(activeRackGroup, [0.14, height, 0.14], [-width / 2, 0, frontZ], rackMat);
+  addBox(activeRackGroup, [0.14, height, 0.14], [width / 2, 0, frontZ], rackMat);
+  addBox(activeRackGroup, [0.18, height, depth], [-width / 2, 0, 0], sideMat);
+  addBox(activeRackGroup, [0.18, height, depth], [width / 2, 0, 0], sideMat);
+  addBox(activeRackGroup, [width, height, 0.16], [0, 0, -depth / 2], sideMat);
+  addBox(activeRackGroup, [0.045, height - 0.46, 0.08], [-width / 2 + 0.18, 0, frontZ + 0.05], railMat);
+  addBox(activeRackGroup, [0.045, height - 0.46, 0.08], [width / 2 - 0.18, 0, frontZ + 0.05], railMat);
+  addRackUnitTicks(activeRackGroup, width, height, frontZ, unitHeight, bottomY);
+  addSideVents(activeRackGroup, width, depth, height);
+  addSideLogos(activeRackGroup, width, height);
+  addRearPdu(activeRackGroup, width, depth, height);
+  addWheels(activeRackGroup, width, depth, height);
 
   const actualNodes = nodes.slice(0, RACK_UNITS);
   const placements = computePlacements(actualNodes);
@@ -358,7 +363,7 @@ function buildRack(nodes) {
     const serverHeight = Math.max(unitHeight * units * 0.9, unitHeight * 0.72);
     const isGpu = Number(node.gpu_total || 0) > 0;
     createServer(group, node, type, y, serverHeight, width, frontZ, isGpu, { units, startU });
-    state.rackGroup.add(group);
+    activeRackGroup.add(group);
   });
   updateContextVisibility();
 }
@@ -423,6 +428,7 @@ function addRoomContext(parent, nodes, rackSize) {
   });
 
   addBox(parent, [rackSize.width + 0.58, 0.028, rackSize.depth + 0.48], [0, -3.015, 0], createMaterial(0xd9eef0, 0.64, 0.02), "active-rack-pad");
+  addMiniRack(parent, [0, -2.35, 0], 0xd95f43, 0.92);
 }
 
 function addMiniRack(parent, position, color, scale = 0.72) {
@@ -453,22 +459,30 @@ function addFloorContext(parent) {
   const slabMat = createMaterial(0xf5f7fa, 0.8, 0.02);
   const wallMat = createMaterial(0xcbd5df, 0.68, 0.04);
   const coreMat = createMaterial(0x213342, 0.5, 0.18);
-  addBox(parent, [18, 0.055, 12], [0, -3.09, 0], slabMat, "floor-plate");
-  addBox(parent, [18, 0.08, 0.08], [0, -3.0, -6], wallMat, "floor-outline");
-  addBox(parent, [18, 0.08, 0.08], [0, -3.0, 6], wallMat, "floor-outline");
-  addBox(parent, [0.08, 0.08, 12], [-9, -3.0, 0], wallMat, "floor-outline");
-  addBox(parent, [0.08, 0.08, 12], [9, -3.0, 0], wallMat, "floor-outline");
-  addBox(parent, [2.2, 0.16, 5.6], [0, -2.9, 0], coreMat, "floor-core");
-  addBox(parent, [0.08, 0.12, 12], [0, -2.88, 0], wallMat, "floor-corridor");
-  addBox(parent, [18, 0.12, 0.08], [0, -2.88, 0], wallMat, "floor-corridor");
+  const levelNames = ["1F POWER", "2F DATA HALL", "3F GPU HALL", "4F NOC"];
+  const zoneColors = [0xe5a423, 0x0b6f7a, 0x4b62b5, 0xd95f43];
 
-  const zones = [
-    ["DATA HALL A", -5.4, -3.2, 0x4b62b5],
-    ["DATA HALL B", 5.4, -3.2, 0x0b6f7a],
-    ["POWER ROOM", -5.4, 3.2, 0xe5a423],
-    ["NOC", 5.4, 3.2, 0xd95f43]
-  ];
-  zones.forEach(([name, x, z, color]) => addRoomLabel(parent, name, [x, -2.82, z], color));
+  for (let level = 0; level < 4; level += 1) {
+    const floor = new THREE.Group();
+    floor.position.set(0, -3.08 + level * 0.42, -level * 0.42);
+    floor.scale.set(1 - level * 0.045, 1, 1 - level * 0.045);
+    parent.add(floor);
+    addBox(floor, [17.5, 0.055, 11.4], [0, 0, 0], slabMat, "stacked-floor-plate");
+    addBox(floor, [17.5, 0.08, 0.08], [0, 0.09, -5.7], wallMat, "stacked-floor-outline");
+    addBox(floor, [17.5, 0.08, 0.08], [0, 0.09, 5.7], wallMat, "stacked-floor-outline");
+    addBox(floor, [0.08, 0.08, 11.4], [-8.75, 0.09, 0], wallMat, "stacked-floor-outline");
+    addBox(floor, [0.08, 0.08, 11.4], [8.75, 0.09, 0], wallMat, "stacked-floor-outline");
+    addBox(floor, [2.0, 0.14, 4.8], [0, 0.17, 0], coreMat, "floor-core");
+    addBox(floor, [0.08, 0.12, 10.2], [0, 0.2, 0], wallMat, "floor-corridor");
+    addBox(floor, [16.2, 0.12, 0.08], [0, 0.2, 0], wallMat, "floor-corridor");
+    addBox(floor, [3.7, 0.08, 2.4], [-5.4, 0.22, -3.1], createMaterial(zoneColors[level], 0.58, 0.04, { transparent: true, opacity: 0.42 }), "floor-zone");
+    addBox(floor, [3.7, 0.08, 2.4], [5.4, 0.22, -3.1], createMaterial(0x74aabf, 0.58, 0.04, { transparent: true, opacity: 0.34 }), "floor-zone");
+    addRoomLabel(floor, levelNames[level], [-5.4, 0.31, -3.1], zoneColors[level]);
+    if (level === 2) {
+      addMiniRack(floor, [-5.9, 0.9, -2.6], 0x4b62b5, 0.45);
+      addMiniRack(floor, [-5.1, 0.9, -2.6], 0x4b62b5, 0.45);
+    }
+  }
 }
 
 function addBuildingContext(parent) {
@@ -477,22 +491,22 @@ function addBuildingContext(parent) {
   const glassMat = createMaterial(0x74aabf, 0.36, 0.06, { transparent: true, opacity: 0.72 });
   const signMat = createSignMaterial();
   const building = new THREE.Group();
-  building.position.set(0, 0.2, -12.5);
+  building.position.set(0, -0.2, 0);
   parent.add(building);
 
-  addBox(building, [8.2, 5.4, 3.8], [0, -0.45, 0], baseMat, "cluster-center-building");
-  addBox(building, [8.35, 0.32, 4.0], [0, 2.45, 0], sideMat, "building-roof");
-  addBox(building, [8.5, 0.24, 4.2], [0, -3.2, 0], sideMat, "building-base");
+  addBox(building, [12.2, 8.2, 5.8], [0, 0.25, 0], baseMat, "cluster-center-building");
+  addBox(building, [12.6, 0.42, 6.2], [0, 4.58, 0], sideMat, "building-roof");
+  addBox(building, [12.9, 0.34, 6.5], [0, -4.05, 0], sideMat, "building-base");
   for (let floor = 0; floor < 4; floor += 1) {
-    const y = -2.1 + floor * 1.05;
-    for (let i = 0; i < 7; i += 1) {
-      addBox(building, [0.62, 0.38, 0.045], [-3 + i, y, 1.93], glassMat, "building-window");
+    const y = -2.45 + floor * 1.55;
+    for (let i = 0; i < 9; i += 1) {
+      addBox(building, [0.72, 0.46, 0.055], [-4.4 + i * 1.1, y, 2.93], glassMat, "building-window");
     }
   }
-  addBox(building, [1.2, 1.2, 0.06], [0, -2.55, 1.96], createMaterial(0x0b1117, 0.42, 0.2), "building-door");
+  addBox(building, [1.6, 1.65, 0.08], [0, -3.3, 2.98], createMaterial(0x0b1117, 0.42, 0.2), "building-door");
   if (signMat) {
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(6.6, 0.82), signMat);
-    sign.position.set(0, 1.95, 2.015);
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(8.6, 1.05), signMat);
+    sign.position.set(0, 3.05, 3.03);
     building.add(sign);
   }
 }
@@ -540,10 +554,16 @@ function createSignMaterial() {
 }
 
 function updateContextVisibility() {
-  const { roomGroup, floorGroup, buildingGroup } = state.contextGroups || {};
+  const { activeRackGroup, roomGroup, floorGroup, buildingGroup } = state.contextGroups || {};
   if (!roomGroup || !floorGroup || !buildingGroup) return;
-  roomGroup.visible = state.zoom >= 13.5;
-  floorGroup.visible = state.zoom >= 25;
+  if (activeRackGroup) {
+    const shrink = Math.max(0, Math.min(1, (state.zoom - 11) / 12));
+    const scale = 1 - shrink * 0.72;
+    activeRackGroup.visible = state.zoom < 25;
+    activeRackGroup.scale.set(scale, scale, scale);
+  }
+  roomGroup.visible = state.zoom >= 12 && state.zoom < 27;
+  floorGroup.visible = state.zoom >= 23 && state.zoom < 43;
   buildingGroup.visible = state.zoom >= 40;
 }
 
@@ -882,5 +902,11 @@ function update(payload = {}) {
   resize();
 }
 
-window.DAquilaHardware3D = { update, resize };
+function setZoom(value) {
+  state.zoom = Math.max(5.6, Math.min(62, Number(value) || state.zoom));
+  updateCameraPosition();
+  updateContextVisibility();
+}
+
+window.DAquilaHardware3D = { update, resize, setZoom };
 window.dispatchEvent(new CustomEvent("d-aquila-hardware-ready"));
