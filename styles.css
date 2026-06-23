@@ -1293,6 +1293,122 @@ h2 {
   background: #fff1cf;
 }
 
+.settings-status-grid .metric:nth-child(1)::before {
+  background: var(--ok);
+}
+
+.settings-status-grid .metric:nth-child(2)::before {
+  background: var(--amber);
+}
+
+.settings-status-grid .metric:nth-child(3)::before {
+  background: var(--blue);
+}
+
+.settings-status-grid .metric:nth-child(4)::before {
+  background: var(--violet);
+}
+
+.settings-status-grid .metric:nth-child(5)::before {
+  background: var(--rose);
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
+  gap: 18px;
+  min-width: 0;
+}
+
+.settings-wide-panel {
+  grid-column: 1 / -1;
+}
+
+.settings-panel {
+  background: linear-gradient(135deg, #ffffff 0%, #f6f9fc 100%);
+}
+
+.settings-panel::before {
+  background: var(--blue);
+}
+
+.check-list,
+.target-list,
+.command-list,
+.config-list {
+  display: grid;
+  gap: 10px;
+}
+
+.check-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 11px;
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.check-row > span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.check-row.ok > span {
+  background: var(--ok);
+}
+
+.check-row.warn > span {
+  background: var(--warn);
+}
+
+.check-row.bad > span {
+  background: var(--bad);
+}
+
+.check-row div {
+  min-width: 0;
+}
+
+.check-row strong,
+.check-row small,
+.target-row strong,
+.target-row span,
+.config-row span,
+.config-row strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.check-row small,
+.target-row span,
+.config-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.target-row,
+.config-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 11px;
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.target-row span,
+.config-row strong {
+  text-align: right;
+}
+
 .panel-header.compact {
   align-items: center;
 }
@@ -1785,8 +1901,13 @@ textarea {
   .job-insights,
   .node-insights,
   .power-insights,
-  .power-detail-grid {
+  .power-detail-grid,
+  .settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-wide-panel {
+    grid-column: auto;
   }
 
   .right-column {
@@ -1839,13 +1960,17 @@ textarea {
   .node-state-row,
   .gpu-pool,
   .gpu-pool-meta,
-  .power-signal-grid {
+  .power-signal-grid,
+  .target-row,
+  .config-row {
     grid-template-columns: 1fr;
   }
 
   .queue-row strong,
   .partition-row span,
-  .node-state-row strong {
+  .node-state-row strong,
+  .target-row span,
+  .config-row strong {
     text-align: left;
   }
 

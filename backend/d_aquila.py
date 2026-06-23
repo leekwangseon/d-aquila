@@ -104,6 +104,14 @@ def authenticate_os_user(username: str, password: str) -> None:
         raise HTTPException(status_code=401, detail="Invalid OS username or password") from exc
 
 
+def pam_available() -> bool:
+    try:
+        import pamela  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 @app.post("/api/auth/login")
 def login(request: LoginRequest, response: Response) -> dict[str, Any]:
     authenticate_os_user(request.username, request.password)
@@ -359,6 +367,15 @@ def discovery() -> dict[str, Any]:
             "targets_by_job": prometheus_targets,
         },
         "submit_enabled": ENABLE_SUBMIT,
+        "auth": {
+            "mode": AUTH_MODE,
+            "pam_available": pam_available(),
+            "session_seconds": AUTH_SESSION_SECONDS,
+        },
+        "runtime": {
+            "disk_path": os.getenv("D_AQUILA_DISK_PATH", "/"),
+            "command_timeout": COMMAND_TIMEOUT,
+        },
     }
 
 

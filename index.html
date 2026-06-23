@@ -59,6 +59,10 @@
             <span class="icon">P</span>
             <span>전력/온도</span>
           </button>
+          <button class="nav-item" type="button" data-view="settings">
+            <span class="icon">S</span>
+            <span>설정</span>
+          </button>
         </nav>
 
         <div class="cluster-health">
@@ -568,6 +572,89 @@
                 </div>
               </div>
               <div class="event-list" id="powerEventList"></div>
+            </article>
+          </section>
+        </section>
+
+        <section class="view" data-view-panel="settings">
+          <section class="status-grid settings-status-grid">
+            <article class="metric">
+              <span class="metric-label">Slurm</span>
+              <strong id="settingsSlurmMetric">-</strong>
+              <small id="settingsSlurmDetail">client / config</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">Munge</span>
+              <strong id="settingsMungeMetric">-</strong>
+              <small id="settingsMungeDetail">socket</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">Prometheus</span>
+              <strong id="settingsPromMetric">-</strong>
+              <small id="settingsPromDetail">target discovery</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">인증</span>
+              <strong id="settingsAuthMetric">-</strong>
+              <small id="settingsAuthDetail">PAM / session</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">작업 제출</span>
+              <strong id="settingsSubmitMetric">-</strong>
+              <small>sbatch policy</small>
+            </article>
+          </section>
+
+          <section class="settings-grid">
+            <article class="panel settings-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>연결 진단</h2>
+                  <p>D-aquila가 현재 보고 있는 시스템 연결 상태입니다.</p>
+                </div>
+                <button class="ghost-action" id="refreshSettings" type="button">다시 검사</button>
+              </div>
+              <div class="check-list" id="connectionChecks"></div>
+            </article>
+
+            <article class="panel settings-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>Prometheus Targets</h2>
+                  <p>감지된 exporter target을 job 이름별로 요약합니다.</p>
+                </div>
+              </div>
+              <div class="target-list" id="settingsTargets"></div>
+            </article>
+
+            <article class="panel settings-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>Slurm 명령</h2>
+                  <p>컨테이너 또는 호스트에서 감지한 Slurm CLI입니다.</p>
+                </div>
+              </div>
+              <div class="command-list" id="settingsCommands"></div>
+            </article>
+
+            <article class="panel settings-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>운영 설정</h2>
+                  <p>인증, 타임아웃, 디스크 기준 경로 등 실행 설정입니다.</p>
+                </div>
+              </div>
+              <div class="config-list" id="settingsRuntime"></div>
+            </article>
+
+            <article class="panel settings-wide-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>권장 조치</h2>
+                  <p>미연결 항목이 있을 때 다음에 확인할 일을 정리합니다.</p>
+                </div>
+              </div>
+              <div class="event-list" id="settingsActions"></div>
             </article>
           </section>
         </section>

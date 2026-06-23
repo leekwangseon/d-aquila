@@ -6,6 +6,7 @@ let latestNodes = [];
 let latestTargets = [];
 let latestSummary = null;
 let latestSystem = null;
+let latestDiscovery = null;
 let loadHistory = [];
 let refreshTimer = null;
 
@@ -28,7 +29,8 @@ const viewTitles = {
   resources: "리소스 사용량",
   jobs: "작업 모니터링",
   nodes: "클러스터 노드",
-  power: "전력/온도"
+  power: "전력/온도",
+  settings: "설정 / 연결 진단"
 };
 
 function showLogin(message = "") {
@@ -841,6 +843,118 @@ function renderPowerInsights(summary, system) {
   }
 }
 
+function okText(ok) {
+  return ok ? "OK" : "확인 필요";
+}
+
+function checkRow(level, title, detail) {
+  return `
+    <div class="check-row ${level}">
+      <span></span>
+      <div>
+        <strong>${escapeHtml(title)}</strong>
+        <small>${escapeHtml(detail)}</small>
+      </div>
+    </div>
+  `;
+}
+
+function renderSettings(discovery) {
+  const commands = discovery?.commands || {};
+  const commandValues = Object.values(commands);
+  const slurmClientOk = ["sinfo", "squeue", "scontrol"].every((name) => !!commands[name]);
+  const slurmConfigOk = (discovery?.slurm_config_paths || []).length > 0;
+  const mungeOk = (discovery?.munge_sockets || []).length > 0;
+  const promReady = !!discovery?.prometheus?.ready;
+  const auth = discovery?.auth || {};
+  const pamOk = auth.mode !== "pam" || !!auth.pam_available;
+  const submitEnabled = !!discovery?.submit_enabled;
+  const targetCounts = discovery?.prometheus?.targets_by_job || {};
+
+  setText("#settingsSlurmMetric", slurmClientOk && slurmConfigOk ? "OK" : "주의");
+  setText("#settingsSlurmDetail", `${commandValues.filter(Boolean).length}/5 commands · ${(discovery?.slurm_config_paths || []).length} config`);
+  setText("#settingsMungeMetric", okText(mungeOk));
+  setText("#settingsMungeDetail", mungeOk ? `${discovery.munge_sockets.length} socket` : "socket 없음");
+  setText("#settingsPromMetric", promReady ? "OK" : "미연결");
+  setText("#settingsPromDetail", discovery?.prometheus?.url || "Prometheus URL 없음");
+  setText("#settingsAuthMetric", auth.mode === "disabled" ? "Disabled" : okText(pamOk));
+  setText("#settingsAuthDetail", `${auth.mode || "-"} · ${auth.session_seconds || "-"}s`);
+  setText("#settingsSubmitMetric", submitEnabled ? "Enabled" : "Disabled");
+
+  const checks = [
+    [slurmClientOk ? "ok" : "warn", "Slurm client", slurmClientOk ? "sinfo, squeue, scontrol 명령을 사용할 수 있습니다." : "필수 Slurm 명령 일부가 감지되지 않았습니다."],
+    [slurmConfigOk ? "ok" : "warn", "Slurm config", slurmConfigOk ? discovery.slurm_config_paths.join(", ") : "/etc/slurm 또는 /etc/slurm-llnl 마운트를 확인하세요."],
+    [mungeOk ? "ok" : "warn", "Munge socket", mungeOk ? discovery.munge_sockets.join(", ") : "/run/munge 또는 /var/run/munge 마운트를 확인하세요."],
+    [promReady ? "ok" : "warn", "Prometheus", promReady ? `${discovery.prometheus.url} 응답 확인` : `${discovery?.prometheus?.url || "Prometheus"} 연결 실패`],
+    [pamOk ? "ok" : "warn", "OS account login", auth.mode === "disabled" ? "개발 모드: 인증이 비활성화되어 있습니다." : pamOk ? "PAM 인증 모듈을 사용할 수 있습니다." : "pamela/PAM 런타임 또는 호스트 계정 마운트를 확인하세요."],
+    [submitEnabled ? "warn" : "ok", "Job submission", submitEnabled ? "작업 제출이 켜져 있습니다. 정책 제한을 확인하세요." : "작업 제출은 비활성화되어 있습니다."]
+  ];
+  const checkList = document.querySelector("#connectionChecks");
+  if (checkList) checkList.innerHTML = checks.map(([level, title, detail]) => checkRow(level, title, detail)).join("");
+
+  const commandList = document.querySelector("#settingsCommands");
+  if (commandList) {
+    commandList.innerHTML = Object.entries(commands).map(([name, path]) => `
+      <div class="config-row">
+        <span>${escapeHtml(name)}</span>
+        <strong>${escapeHtml(path || "missing")}</strong>
+      </div>
+    `).join("");
+  }
+
+  const targetList = document.querySelector("#settingsTargets");
+  if (targetList) {
+    const entries = Object.entries(targetCounts).sort((a, b) => b[1] - a[1]);
+    targetList.innerHTML = entries.length
+      ? entries.map(([job, count]) => `
+          <div class="target-row">
+            <strong>${escapeHtml(job)}</strong>
+            <span>${count} targets</span>
+          </div>
+        `).join("")
+      : `<div class="empty-inline"><strong>Target 없음</strong><span>Prometheus target이 감지되면 여기에 표시됩니다.</span></div>`;
+  }
+
+  const runtime = document.querySelector("#settingsRuntime");
+  if (runtime) {
+    const rows = [
+      ["Auth mode", auth.mode || "-"],
+      ["PAM available", String(!!auth.pam_available)],
+      ["Session", auth.session_seconds ? `${auth.session_seconds}s` : "-"],
+      ["Disk path", discovery?.runtime?.disk_path || "-"],
+      ["Command timeout", discovery?.runtime?.command_timeout ? `${discovery.runtime.command_timeout}s` : "-"],
+      ["Prometheus URL", discovery?.prometheus?.url || "-"]
+    ];
+    runtime.innerHTML = rows.map(([key, value]) => `
+      <div class="config-row">
+        <span>${escapeHtml(key)}</span>
+        <strong>${escapeHtml(value)}</strong>
+      </div>
+    `).join("");
+  }
+
+  const actions = [];
+  if (!slurmClientOk) actions.push({ level: "warn", title: "Slurm client 확인", detail: "컨테이너에 slurm-client가 설치됐는지, 명령 PATH가 맞는지 확인하세요." });
+  if (!slurmConfigOk) actions.push({ level: "warn", title: "Slurm 설정 마운트", detail: "/etc/slurm 또는 /etc/slurm-llnl을 읽기 전용으로 마운트하세요." });
+  if (!mungeOk) actions.push({ level: "warn", title: "Munge socket 마운트", detail: "Slurm 명령 인증을 위해 /run/munge/munge.socket.2가 필요할 수 있습니다." });
+  if (!promReady) actions.push({ level: "warn", title: "Prometheus URL 확인", detail: "D_AQUILA_PROMETHEUS_URL 또는 localhost:9090 접근성을 확인하세요." });
+  if (!pamOk) actions.push({ level: "warn", title: "PAM 인증 확인", detail: "pamela 패키지, PAM 모듈, /etc/shadow 마운트 정책을 점검하세요." });
+  if (submitEnabled) actions.push({ level: "busy", title: "작업 제출 정책 확인", detail: "허용 파티션, 최대 CPU/GPU/메모리/시간 제한을 정하세요." });
+  if (!actions.length) actions.push({ level: "ok", title: "주요 조치 없음", detail: "핵심 연결 진단이 안정적으로 보입니다." });
+  const actionList = document.querySelector("#settingsActions");
+  if (actionList) {
+    actionList.innerHTML = actions.map((event) => `
+      <div class="event ${event.level}">
+        <span></span>
+        <div>
+          <strong>${escapeHtml(event.title)}</strong>
+          <small>${escapeHtml(event.detail)}</small>
+        </div>
+      </div>
+    `).join("");
+  }
+}
+
 function updateMetrics(summary, system) {
   const systemCpu = Number(system?.cpu?.usage_percent);
   const slurmCpu = Number(summary?.cpu_usage_percent);
@@ -921,16 +1035,18 @@ ${body}`;
 }
 
 async function refreshData() {
-  const [summary, system, nodeData, jobData, targetData] = await Promise.all([
+  const [summary, system, nodeData, jobData, targetData, discoveryData] = await Promise.all([
     loadOptional("/api/summary", {}),
     loadOptional("/api/system", {}),
     loadOptional("/api/nodes", { nodes: [] }),
     loadOptional("/api/jobs", { jobs: [] }),
-    loadOptional("/api/targets", { targets: [] })
+    loadOptional("/api/targets", { targets: [] }),
+    loadOptional("/api/discovery", {})
   ]);
 
   latestSummary = summary.unavailable ? null : summary;
   latestSystem = system.unavailable ? null : system;
+  latestDiscovery = discoveryData.unavailable ? null : discoveryData;
   latestNodes = nodeData.nodes || [];
   latestTargets = targetData.targets || [];
   jobs = jobData.jobs || [];
@@ -941,8 +1057,9 @@ async function refreshData() {
   renderNodeInsights();
   renderJobs(searchInput.value);
   renderAlerts();
+  renderSettings(latestDiscovery);
 
-  const connected = !summary.unavailable || !system.unavailable || !nodeData.unavailable || !jobData.unavailable || !targetData.unavailable;
+  const connected = !summary.unavailable || !system.unavailable || !nodeData.unavailable || !jobData.unavailable || !targetData.unavailable || !discoveryData.unavailable;
   setApiState(connected ? "Live API" : "No API", connected);
 }
 
@@ -981,6 +1098,10 @@ jobForm.addEventListener("submit", async (event) => {
 });
 
 document.querySelector("#refreshJobs").addEventListener("click", async () => {
+  await refreshData();
+});
+
+document.querySelector("#refreshSettings")?.addEventListener("click", async () => {
   await refreshData();
 });
 
