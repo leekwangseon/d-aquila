@@ -568,9 +568,6 @@ function drawLineChart(canvas, values = [], color, label, maxValue = 100) {
   ctx.strokeStyle = color;
   ctx.lineWidth = 3;
   ctx.stroke();
-  ctx.fillStyle = "#657282";
-  ctx.font = "12px Arial";
-  ctx.fillText(label, 14, 20);
 }
 
 function drawThermalChart(values = []) {
@@ -632,11 +629,6 @@ function drawLoadChart(system) {
   ctx.beginPath();
   ctx.arc(dotX, dotY, 4, 0, Math.PI * 2);
   ctx.fill();
-
-  ctx.fillStyle = "#657282";
-  ctx.font = "600 12px Arial, sans-serif";
-  ctx.textBaseline = "top";
-  ctx.fillText("Load / core pressure", 16, 14);
 }
 
 function formatPercent(value) {
