@@ -1,0 +1,26 @@
+services:
+  d-aquila:
+    build: .
+    image: d-aquila:0.1
+    container_name: d-aquila
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      D_AQUILA_PROMETHEUS_URL: ${D_AQUILA_PROMETHEUS_URL:-http://localhost:9090}
+      D_AQUILA_ENABLE_SUBMIT: ${D_AQUILA_ENABLE_SUBMIT:-false}
+      D_AQUILA_COMMAND_TIMEOUT: ${D_AQUILA_COMMAND_TIMEOUT:-10}
+      D_AQUILA_DISK_PATH: ${D_AQUILA_DISK_PATH:-/host}
+      D_AQUILA_AUTH_MODE: ${D_AQUILA_AUTH_MODE:-pam}
+      D_AQUILA_AUTH_SESSION_SECONDS: ${D_AQUILA_AUTH_SESSION_SECONDS:-28800}
+    volumes:
+      - /:/host:ro
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+      - /etc/shadow:/etc/shadow:ro
+      - /etc/pam.d:/etc/pam.d:ro
+      - /etc/nsswitch.conf:/etc/nsswitch.conf:ro
+      - /sys:/sys:ro
+      - /etc/slurm:/etc/slurm:ro
+      - /etc/slurm-llnl:/etc/slurm-llnl:ro
+      - /run/munge:/run/munge:ro
+      - /var/run/munge:/var/run/munge:ro

@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.log
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+build/
+*.tar.gz
+d-aquila-home-example.png

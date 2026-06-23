@@ -1,0 +1,1024 @@
+const API_BASE = location.protocol.startsWith("http") ? location.origin : "http://127.0.0.1:8000";
+
+let racks = [];
+let jobs = [];
+let latestNodes = [];
+let latestTargets = [];
+let latestSummary = null;
+let latestSystem = null;
+let loadHistory = [];
+let refreshTimer = null;
+
+const loginScreen = document.querySelector("#loginScreen");
+const appShell = document.querySelector("#appShell");
+const loginForm = document.querySelector("#loginForm");
+const loginMessage = document.querySelector("#loginMessage");
+const rackMap = document.querySelector("#rackMap");
+const jobTable = document.querySelector("#jobTable");
+const alertList = document.querySelector("#alerts");
+const submitDialog = document.querySelector("#submitDialog");
+const jobForm = document.querySelector("#jobForm");
+const searchInput = document.querySelector("#searchInput");
+const apiState = document.querySelector("#apiState");
+const viewTitle = document.querySelector("#viewTitle");
+const filesystemList = document.querySelector("#filesystemList");
+
+const viewTitles = {
+  overview: "운영 개요",
+  resources: "리소스 사용량",
+  jobs: "작업 모니터링",
+  nodes: "클러스터 노드",
+  power: "전력/온도"
+};
+
+function showLogin(message = "") {
+  loginScreen?.classList.remove("hidden");
+  appShell?.classList.add("locked");
+  if (loginMessage && message) loginMessage.textContent = message;
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = null;
+}
+
+function showApp(username = "") {
+  loginScreen?.classList.add("hidden");
+  appShell?.classList.remove("locked");
+  if (username) setApiState(`Live API · ${username}`, true);
+}
+
+function setApiState(text, ok = true) {
+  apiState.textContent = text;
+  apiState.classList.toggle("offline", !ok);
+}
+
+async function apiGet(path) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(`${API_BASE}${path}`, { cache: "no-store", credentials: "same-origin", signal: controller.signal });
+    if (response.status === 401) {
+      showLogin("세션이 만료되었습니다. 다시 로그인하세요.");
+      throw new Error("Login required");
+    }
+    if (!response.ok) throw new Error(`${path} returned ${response.status}`);
+    return response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function apiPost(path, payload) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (response.status === 401) showLogin("로그인이 필요합니다.");
+  if (!response.ok) throw new Error(data.detail || `${path} returned ${response.status}`);
+  return data;
+}
+
+async function checkAuth() {
+  try {
+    const auth = await apiGet("/api/auth/me");
+    if (auth.authenticated) {
+      showApp(auth.username);
+      await refreshData();
+      refreshTimer = setInterval(refreshData, 15000);
+    } else {
+      showLogin(auth.auth_mode === "pam" ? "운영 노드 OS 계정으로 로그인하세요." : "로그인이 필요합니다.");
+    }
+  } catch (error) {
+    showLogin("인증 상태를 확인할 수 없습니다.");
+  }
+}
+
+async function loadOptional(path, fallback) {
+  try {
+    return await apiGet(path);
+  } catch (error) {
+    return { ...fallback, unavailable: true, error: error.message };
+  }
+}
+
+function groupNodes(nodes) {
+  const buckets = new Map();
+
+  nodes.forEach((node) => {
+    const gpuType = (node.gres.match(/gpu:([^:,\s]+)/) || [])[1];
+    const firstPartition = String(node.partitions || "").split(",").filter(Boolean)[0];
+    const type = node.gpu_total > 0 || node.gres.includes("gpu") ? "gpu" : "cpu";
+    const name = gpuType ? `GPU ${gpuType.toUpperCase()}` : firstPartition || (type === "gpu" ? "GPU nodes" : "CPU nodes");
+    const key = `${type}:${name}`;
+    if (!buckets.has(key)) {
+      buckets.set(key, { name, type, members: [] });
+    }
+    buckets.get(key).members.push(node);
+  });
+
+  return Array.from(buckets.values())
+    .map((group) => {
+      const members = group.members;
+      const busy = members.filter((node) => ["allocated", "mixed", "completing"].includes(node.state.toLowerCase())).length;
+      const down = members.filter((node) => node.state.toLowerCase().includes("down")).length;
+      const warn = members.filter((node) => node.state.toLowerCase().includes("drain") || node.state.toLowerCase().includes("fail")).length;
+      return {
+        ...group,
+        nodes: members.length,
+        busy,
+        warn,
+        down,
+        power: group.type === "gpu" ? "DCGM" : "node-exporter"
+      };
+    })
+    .sort((a, b) => `${a.type}:${a.name}`.localeCompare(`${b.type}:${b.name}`));
+}
+
+function renderRacks(filter = "all") {
+  rackMap.innerHTML = "";
+  const visible = racks.filter((rack) => filter === "all" || rack.type === filter || (filter === "warn" && rack.warn + rack.down > 0));
+
+  if (!visible.length) {
+    rackMap.innerHTML = `
+      <div class="empty-state">
+        <strong>노드 데이터 없음</strong>
+        <span>Slurm client, slurm.conf, Munge socket이 감지되면 실제 노드가 표시됩니다.</span>
+      </div>
+    `;
+    return;
+  }
+
+  visible.forEach((rack) => {
+    const card = document.createElement("article");
+    card.className = "rack";
+    card.innerHTML = `
+      <div class="rack-title">
+        <span>${rack.name}</span>
+        <span>${rack.type.toUpperCase()} / ${rack.power}</span>
+      </div>
+      <div class="node-grid"></div>
+    `;
+
+    const grid = card.querySelector(".node-grid");
+    const members = rack.members || [];
+    for (let i = 0; i < rack.nodes; i += 1) {
+      const nodeData = members[i];
+      const node = document.createElement("button");
+      const cpuPct = nodeData ? Math.round((nodeData.cpu_alloc / Math.max(nodeData.cpu_total, 1)) * 100) : 0;
+      let state = i < rack.busy ? "busy" : "idle";
+      if (nodeData?.state?.toLowerCase().includes("drain") || nodeData?.state?.toLowerCase().includes("fail")) state = "warn";
+      if (nodeData?.state?.toLowerCase().includes("down")) state = "down";
+      node.className = `node ${rack.type} ${state}`;
+      node.type = "button";
+      node.dataset.load = state === "idle" ? "" : `${cpuPct || ""}%`;
+      node.title = nodeData
+        ? `${nodeData.name} / ${nodeData.state} / CPU ${nodeData.cpu_alloc}/${nodeData.cpu_total} / GPU ${nodeData.gpu_alloc}/${nodeData.gpu_total}`
+        : `${rack.name}-${i + 1}`;
+      grid.appendChild(node);
+    }
+
+    rackMap.appendChild(card);
+  });
+}
+
+function nodeHealthType(node) {
+  const state = String(node.state || "").toLowerCase();
+  if (state.includes("down")) return "down";
+  if (state.includes("drain") || state.includes("fail")) return "warn";
+  if (state.includes("alloc") || state.includes("mix") || state.includes("completing")) return "busy";
+  return "idle";
+}
+
+function renderNodeInsights() {
+  const nodes = latestNodes;
+  const total = nodes.length;
+  const busy = nodes.filter((node) => nodeHealthType(node) === "busy").length;
+  const warn = nodes.filter((node) => nodeHealthType(node) === "warn").length;
+  const down = nodes.filter((node) => nodeHealthType(node) === "down").length;
+  const idle = Math.max(total - busy - warn - down, 0);
+  const active = total - warn - down;
+  const cpuAlloc = nodes.reduce((sum, node) => sum + Number(node.cpu_alloc || 0), 0);
+  const cpuTotal = nodes.reduce((sum, node) => sum + Number(node.cpu_total || 0), 0);
+  const gpuAlloc = nodes.reduce((sum, node) => sum + Number(node.gpu_alloc || 0), 0);
+  const gpuTotal = nodes.reduce((sum, node) => sum + Number(node.gpu_total || 0), 0);
+  const cpuPct = cpuTotal ? (cpuAlloc / cpuTotal) * 100 : Number.NaN;
+  const gpuPct = gpuTotal ? (gpuAlloc / gpuTotal) * 100 : Number.NaN;
+
+  setText("#nodeTotalMetric", String(total));
+  setText("#nodeActiveMetric", String(active));
+  setText("#nodeWarnMetric", String(warn + down));
+  setText("#nodeCpuMetric", Number.isFinite(cpuPct) ? `${Math.round(cpuPct)}%` : "N/A");
+  setText("#nodeCpuDetail", cpuTotal ? `${cpuAlloc} / ${cpuTotal} cores` : "allocated / total");
+  setText("#nodeGpuMetric", Number.isFinite(gpuPct) ? `${Math.round(gpuPct)}%` : "N/A");
+  setText("#nodeGpuDetail", gpuTotal ? `${gpuAlloc} / ${gpuTotal} GPUs` : "allocated / total");
+
+  const stateBars = document.querySelector("#nodeStateBars");
+  if (stateBars) {
+    const states = [
+      ["idle", "IDLE", idle],
+      ["busy", "ALLOC / MIX", busy],
+      ["warn", "DRAIN / FAIL", warn],
+      ["down", "DOWN", down]
+    ].filter(([, , value]) => value > 0);
+    if (!states.length) {
+      renderEmptyInline("#nodeStateBars", "노드 데이터 없음", "Slurm 노드가 연결되면 상태 분포가 표시됩니다.");
+    } else {
+      stateBars.innerHTML = states.map(([type, label, value]) => {
+        const pct = total ? Math.round((value / total) * 100) : 0;
+        return `
+          <div class="node-state-row ${type}">
+            <span>${label}</span>
+            <div class="bar"><i style="width: ${pct}%"></i></div>
+            <strong>${value}</strong>
+          </div>
+        `;
+      }).join("");
+    }
+  }
+
+  const gpuPool = document.querySelector("#gpuPool");
+  if (gpuPool) {
+    const gpuNodes = nodes.filter((node) => Number(node.gpu_total || 0) > 0);
+    if (!gpuNodes.length) {
+      renderEmptyInline("#gpuPool", "GPU 노드 없음", "GPU GRES가 감지되면 할당량이 표시됩니다.");
+    } else {
+      const free = Math.max(gpuTotal - gpuAlloc, 0);
+      gpuPool.innerHTML = `
+        <div class="gpu-ring" style="--gpu-pct: ${Math.max(0, Math.min(100, gpuPct || 0))}">
+          <strong>${Math.round(gpuPct || 0)}%</strong>
+          <span>allocated</span>
+        </div>
+        <div class="gpu-pool-meta">
+          <div><span>GPU Nodes</span><strong>${gpuNodes.length}</strong></div>
+          <div><span>Allocated</span><strong>${gpuAlloc}</strong></div>
+          <div><span>Free</span><strong>${free}</strong></div>
+          <div><span>Total</span><strong>${gpuTotal}</strong></div>
+        </div>
+      `;
+    }
+  }
+
+  const nodeCardList = document.querySelector("#nodeCardList");
+  if (nodeCardList) {
+    if (!nodes.length) {
+      renderEmptyInline("#nodeCardList", "노드 상세 없음", "Slurm scontrol show node가 연결되면 노드 카드가 표시됩니다.");
+    } else {
+      nodeCardList.innerHTML = nodes.slice(0, 24).map((node) => {
+        const type = nodeHealthType(node);
+        const nodeCpuPct = Number(node.cpu_total) ? Math.round((Number(node.cpu_alloc || 0) / Number(node.cpu_total)) * 100) : 0;
+        const nodeGpuPct = Number(node.gpu_total) ? Math.round((Number(node.gpu_alloc || 0) / Number(node.gpu_total)) * 100) : 0;
+        return `
+          <article class="node-card ${type}">
+            <div>
+              <strong>${escapeHtml(node.name || "-")}</strong>
+              <span>${escapeHtml(node.partitions || "-")}</span>
+            </div>
+            <b>${escapeHtml(node.state || "unknown")}</b>
+            <div class="node-card-bars">
+              <span>CPU <em>${node.cpu_alloc || 0}/${node.cpu_total || 0}</em></span>
+              <div class="mini-bar"><i style="width: ${nodeCpuPct}%"></i></div>
+              <span>GPU <em>${node.gpu_alloc || 0}/${node.gpu_total || 0}</em></span>
+              <div class="mini-bar gpu-mini"><i style="width: ${nodeGpuPct}%"></i></div>
+            </div>
+          </article>
+        `;
+      }).join("");
+    }
+  }
+}
+
+function statusLabel(status) {
+  const normalized = String(status || "").toLowerCase();
+  const cls = normalized.includes("run") || normalized === "r" ? "running" : normalized.includes("pend") || normalized === "pd" ? "pending" : normalized.includes("fail") ? "failed" : "completed";
+  return `<span class="status-pill ${cls}">${String(status || "UNKNOWN").toUpperCase()}</span>`;
+}
+
+function jobStatusType(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized.includes("run") || normalized === "r") return "running";
+  if (normalized.includes("pend") || normalized === "pd") return "pending";
+  if (normalized.includes("fail") || normalized === "f" || normalized.includes("cancel")) return "failed";
+  if (normalized.includes("complet") || normalized === "cd") return "completed";
+  return "other";
+}
+
+function extractCpu(job) {
+  const direct = Number(job.min_cpus);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  const values = [job.resource, job.tres].map((value) => String(value || ""));
+  for (const value of values) {
+    const match = value.match(/cpu=(\d+)/i) || value.match(/(\d+)\s*CPU/i);
+    if (match) return Number(match[1]);
+  }
+  return 0;
+}
+
+function extractGpu(job) {
+  const values = [job.tres, job.resource].map((value) => String(value || ""));
+  for (const value of values) {
+    const match = value.match(/(?:gres\/gpu=|gpu[:=]?|GPU\s*\/\s*)(\d+)/i) || value.match(/(\d+)\s*GPU/i);
+    if (match) return Number(match[1]);
+  }
+  return 0;
+}
+
+function countBy(items, keyFn) {
+  return items.reduce((map, item) => {
+    const key = keyFn(item) || "-";
+    map.set(key, (map.get(key) || 0) + 1);
+    return map;
+  }, new Map());
+}
+
+function renderEmptyInline(selector, title, detail) {
+  const element = document.querySelector(selector);
+  if (!element) return;
+  element.innerHTML = `
+    <div class="empty-inline">
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(detail)}</span>
+    </div>
+  `;
+}
+
+function renderJobInsights() {
+  const total = jobs.length;
+  const running = jobs.filter((job) => jobStatusType(job.status) === "running").length;
+  const pending = jobs.filter((job) => jobStatusType(job.status) === "pending").length;
+  const failed = jobs.filter((job) => jobStatusType(job.status) === "failed").length;
+  const completed = jobs.filter((job) => jobStatusType(job.status) === "completed").length;
+  const cpuTotal = jobs.reduce((sum, job) => sum + extractCpu(job), 0);
+  const gpuTotal = jobs.reduce((sum, job) => sum + extractGpu(job), 0);
+
+  setText("#jobTotalMetric", String(total));
+  setText("#jobRunningMetric", String(running));
+  setText("#jobPendingMetric", String(pending));
+  setText("#jobCpuMetric", cpuTotal ? String(cpuTotal) : "-");
+  setText("#jobGpuMetric", gpuTotal ? String(gpuTotal) : "-");
+
+  const stateBars = document.querySelector("#jobStateBars");
+  if (stateBars) {
+    const stateItems = [
+      ["running", "RUNNING", running],
+      ["pending", "PENDING", pending],
+      ["failed", "FAILED", failed],
+      ["completed", "COMPLETED", completed]
+    ].filter(([, , value]) => value > 0);
+    if (!stateItems.length) {
+      renderEmptyInline("#jobStateBars", "작업 데이터 없음", "Slurm squeue가 연결되면 큐 분포가 표시됩니다.");
+    } else {
+      stateBars.innerHTML = stateItems.map(([type, label, value]) => {
+        const pct = total ? Math.round((value / total) * 100) : 0;
+        return `
+          <div class="queue-row ${type}">
+            <span>${label}</span>
+            <div class="bar"><i style="width: ${pct}%"></i></div>
+            <strong>${value}</strong>
+          </div>
+        `;
+      }).join("");
+    }
+  }
+
+  const userCounts = Array.from(countBy(jobs, (job) => job.user).entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const userList = document.querySelector("#jobUserList");
+  if (userList) {
+    if (!userCounts.length) {
+      renderEmptyInline("#jobUserList", "사용자 데이터 없음", "작업이 감지되면 사용자별 점유가 표시됩니다.");
+    } else {
+      const max = Math.max(...userCounts.map(([, count]) => count), 1);
+      userList.innerHTML = userCounts.map(([user, count]) => `
+        <div class="rank-row">
+          <div><strong>${escapeHtml(user)}</strong><span>${count} jobs</span></div>
+          <div class="mini-bar"><i style="width: ${Math.round((count / max) * 100)}%"></i></div>
+        </div>
+      `).join("");
+    }
+  }
+
+  const partitionCounts = Array.from(countBy(jobs, (job) => job.partition).entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const partitionList = document.querySelector("#jobPartitionList");
+  if (partitionList) {
+    if (!partitionCounts.length) {
+      renderEmptyInline("#jobPartitionList", "파티션 데이터 없음", "작업이 감지되면 파티션별 큐가 표시됩니다.");
+    } else {
+      partitionList.innerHTML = partitionCounts.map(([partition, count]) => {
+        const partJobs = jobs.filter((job) => job.partition === partition);
+        const partRunning = partJobs.filter((job) => jobStatusType(job.status) === "running").length;
+        const partPending = partJobs.filter((job) => jobStatusType(job.status) === "pending").length;
+        return `
+          <div class="partition-row">
+            <strong>${escapeHtml(partition)}</strong>
+            <span>${count} jobs</span>
+            <small>${partRunning} running · ${partPending} pending</small>
+          </div>
+        `;
+      }).join("");
+    }
+  }
+}
+
+function renderJobs(query = "") {
+  const normalized = query.trim().toLowerCase();
+  const filtered = jobs.filter((job) => JSON.stringify(job).toLowerCase().includes(normalized)).slice(0, 80);
+  jobTable.innerHTML = "";
+  renderJobInsights();
+
+  if (!filtered.length) {
+    jobTable.innerHTML = `
+      <tr>
+        <td class="table-empty" colspan="6">작업 데이터 없음. Slurm squeue가 연결되면 실제 작업이 표시됩니다.</td>
+      </tr>
+    `;
+    return;
+  }
+
+  filtered.forEach((job) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${job.id}</td>
+      <td>${job.user}</td>
+      <td>${job.partition}</td>
+      <td>${statusLabel(job.status)}</td>
+      <td>${job.resource || job.tres || "-"}</td>
+      <td>${job.time || job.time_left || "-"}</td>
+    `;
+    row.title = `${job.name || ""} ${job.reason || ""}`.trim();
+    jobTable.appendChild(row);
+  });
+}
+
+function renderAlerts() {
+  const downTargets = latestTargets.filter((target) => target.health !== "up");
+  const downNodes = latestNodes.filter((node) => node.state.toLowerCase().includes("down"));
+  const alerts = [
+    ...downNodes.slice(0, 4).map((node) => ({ level: "bad", title: `${node.name} ${node.state}`, detail: node.reason || "Slurm node state" })),
+    ...downTargets.slice(0, 4).map((target) => {
+      const instance = target.instance || target.scrapeUrl || "unknown target";
+      const shortError = String(target.lastError || "scrape failed")
+        .replace(/^.*dial tcp /, "dial tcp ")
+        .replace(/^.*lookup /, "lookup ");
+      return {
+        level: "warn",
+        title: `${target.job || "prometheus"} target down`,
+        detail: `${instance} - ${shortError}`,
+        raw: `${target.instance || ""} ${target.lastError || ""}`.trim()
+      };
+    })
+  ];
+
+  if (!alerts.length) {
+    alerts.push({ level: "info", title: "주요 알림 없음", detail: "연결된 데이터 소스에서 경고가 감지되지 않았습니다." });
+  }
+
+  alertList.innerHTML = alerts
+    .map(
+      (alert) => `
+        <div class="alert ${alert.level}">
+          <span class="alert-dot"></span>
+          <div title="${escapeHtml(alert.raw || alert.detail)}">
+            <strong>${escapeHtml(alert.title)}</strong>
+            <small>${escapeHtml(alert.detail)}</small>
+          </div>
+        </div>
+      `
+    )
+    .join("");
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function setWidth(selector, value) {
+  const element = document.querySelector(selector);
+  if (!element) return;
+  const percent = Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
+  element.style.width = `${percent}%`;
+}
+
+function setText(selector, value) {
+  const element = document.querySelector(selector);
+  if (element) element.textContent = value;
+}
+
+function drawSparkline(canvas, values, color) {
+  const ctx = canvas.getContext("2d");
+  const { width, height } = canvas;
+  ctx.clearRect(0, 0, width, height);
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = color;
+  ctx.beginPath();
+  values.forEach((value, index) => {
+    const x = (index / (values.length - 1)) * width;
+    const y = height - (value / 100) * (height - 6) - 3;
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+function drawThermalChart(values = []) {
+  const canvas = document.querySelector("#thermalChart");
+  const ctx = canvas.getContext("2d");
+  const series = values.length ? values : [0, 0, 0, 0, 0, 0, 0, 0];
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#f8fafc";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = "#d7dde6";
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i += 1) {
+    const y = (canvas.height / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(canvas.width, y);
+    ctx.stroke();
+  }
+
+  ctx.beginPath();
+  series.forEach((value, index) => {
+    const x = 16 + (index / (series.length - 1)) * (canvas.width - 32);
+    const y = canvas.height - 18 - (value / 100) * (canvas.height - 36);
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = "#d95f43";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+}
+
+function drawLoadChart(system) {
+  const canvas = document.querySelector("#loadChart");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const cores = Math.max(Number(system?.cpu?.logical_count || 1), 1);
+  const load1 = Number(system?.cpu?.load1 || 0);
+  if (Number.isFinite(load1)) {
+    loadHistory.push({ load: load1, ratio: Math.min((load1 / cores) * 100, 100) });
+    loadHistory = loadHistory.slice(-30);
+  }
+  const series = loadHistory.length ? loadHistory : [{ load: 0, ratio: 0 }];
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#f8fafc";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = "#d7dde6";
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i += 1) {
+    const y = (canvas.height / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(canvas.width, y);
+    ctx.stroke();
+  }
+
+  ctx.beginPath();
+  series.forEach((point, index) => {
+    const x = 12 + (index / Math.max(series.length - 1, 1)) * (canvas.width - 24);
+    const y = canvas.height - 16 - (point.ratio / 100) * (canvas.height - 32);
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = "#0b6f7a";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.fillStyle = "#657282";
+  ctx.font = "12px Arial";
+  const latest = series[series.length - 1];
+  ctx.fillText(`load1 ${latest.load.toFixed(2)} / cores ${cores}`, 14, 20);
+}
+
+function formatPercent(value) {
+  return Number.isFinite(value) ? `${Math.round(value)}%` : "N/A";
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  let scaled = value;
+  let unit = 0;
+  while (scaled >= 1024 && unit < units.length - 1) {
+    scaled /= 1024;
+    unit += 1;
+  }
+  return `${scaled >= 10 ? Math.round(scaled) : scaled.toFixed(1)} ${units[unit]}`;
+}
+
+function formatRate(bytesPerSecond) {
+  return `${formatBytes(bytesPerSecond)}/s`;
+}
+
+function formatClock(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDateShort(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function renderFilesystems(filesystems = []) {
+  if (!filesystemList) return;
+  if (!filesystems.length) {
+    filesystemList.innerHTML = `
+      <div class="empty-inline">
+        <strong>파일 시스템 데이터 없음</strong>
+        <span>서버에서 마운트 정보를 읽을 수 있으면 여기에 표시됩니다.</span>
+      </div>
+    `;
+    return;
+  }
+  filesystemList.innerHTML = filesystems
+    .map((fs) => {
+      const percent = Number(fs.usage_percent || 0);
+      return `
+        <div class="fs-row" title="${escapeHtml(`${fs.device} ${fs.fstype}`)}">
+          <div class="fs-meta">
+            <strong>${escapeHtml(fs.mountpoint || "-")}</strong>
+            <span>${formatBytes(fs.used_bytes)} / ${formatBytes(fs.total_bytes)}</span>
+          </div>
+          <div class="mini-bar"><i style="width: ${Math.max(0, Math.min(100, percent))}%"></i></div>
+          <b>${Math.round(percent)}%</b>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function usageLevel(value) {
+  if (!Number.isFinite(value)) return { label: "데이터 없음", className: "unknown" };
+  if (value >= 90) return { label: "위험", className: "bad" };
+  if (value >= 75) return { label: "주의", className: "warn" };
+  if (value >= 55) return { label: "보통", className: "busy" };
+  return { label: "여유", className: "ok" };
+}
+
+function renderOverviewInsights(summary, system) {
+  const cpu = Number(system?.cpu?.usage_percent ?? summary?.cpu_usage_percent);
+  const memory = Number(system?.memory?.usage_percent);
+  const disk = Number(system?.disk?.usage_percent);
+  const gpu = Number(summary?.gpu_usage_percent);
+  const pending = Number(summary?.jobs_pending ?? 0);
+  const downTargets = latestTargets.filter((target) => target.health !== "up").length;
+  const downNodes = latestNodes.filter((node) => node.state.toLowerCase().includes("down")).length;
+  const slurmConnected = latestNodes.length > 0 || jobs.length > 0;
+  const prometheusConnected = latestTargets.length > 0 || !!summary;
+  const connected = !!system || !!summary;
+  const risks = downTargets + downNodes + (disk >= 90 ? 1 : 0) + (memory >= 90 ? 1 : 0);
+  const health = risks > 0 ? "warn" : connected ? "ok" : "unknown";
+  const healthText = health === "ok" ? "정상" : health === "warn" ? "주의" : "확인 중";
+
+  const healthBadge = document.querySelector("#healthBadge");
+  if (healthBadge) {
+    healthBadge.textContent = healthText;
+    healthBadge.className = `health-badge ${health}`;
+  }
+  setText("#healthTitle", health === "ok" ? "운영 상태가 안정적입니다" : health === "warn" ? "확인할 신호가 있습니다" : "데이터를 기다리는 중입니다");
+  setText(
+    "#healthDetail",
+    health === "warn"
+      ? `장애 노드 ${downNodes}개, target down ${downTargets}개를 확인했습니다.`
+      : connected
+        ? "API가 응답하고 핵심 지표가 갱신되고 있습니다."
+        : "백엔드 API 또는 데이터 소스 연결을 확인해야 합니다."
+  );
+  setText("#apiSignal", connected ? "연결" : "대기");
+  setText("#slurmSignal", slurmConnected ? "연결" : "미연결");
+  setText("#promSignal", prometheusConnected ? "연결" : "미연결");
+
+  const candidates = [
+    { name: "CPU", value: cpu },
+    { name: "Memory", value: memory },
+    { name: "Disk", value: disk },
+    { name: "GPU", value: gpu > 0 ? gpu : Number.NaN }
+  ].filter((item) => Number.isFinite(item.value));
+  const hottest = candidates.sort((a, b) => b.value - a.value)[0];
+  const pressure = usageLevel(hottest?.value);
+  const pressureFill = document.querySelector("#pressureFill");
+  if (pressureFill) {
+    pressureFill.style.width = `${Math.max(0, Math.min(100, hottest?.value || 0))}%`;
+    pressureFill.className = `pressure-fill ${pressure.className}`;
+  }
+  setText("#pressureValue", hottest ? `${Math.round(hottest.value)}%` : "N/A");
+  setText("#pressureLabel", hottest ? `${hottest.name} 기준 ${pressure.label}` : "표시할 사용률 없음");
+  setText("#pressureSource", candidates.length ? candidates.map((item) => `${item.name} ${Math.round(item.value)}%`).join(" · ") : "CPU / Memory / Disk / GPU");
+
+  const clusterMode = slurmConnected ? "클러스터 모드" : "단독 서버 모드";
+  setText("#modePill", clusterMode);
+  setText("#profileHost", system?.hostname || "-");
+  setText("#profileIp", system?.ip_address || "-");
+  setText("#profileOs", system?.os ? `${system.os.system} ${system.os.release}` : "-");
+  setText("#profileGpu", Number(summary?.gpu_total || 0) > 0 ? `${Math.round(summary.gpu_total)} detected` : "감지 안 됨");
+
+  const events = [];
+  if (!slurmConnected) events.push({ level: "info", title: "Slurm 미연결", detail: "단독 서버 모드로 시스템 자원을 표시합니다." });
+  if (!prometheusConnected) events.push({ level: "info", title: "Prometheus target 없음", detail: "시스템 API 중심으로 개요를 구성합니다." });
+  if (downTargets) events.push({ level: "warn", title: "Prometheus target down", detail: `${downTargets}개 target 확인 필요` });
+  if (downNodes) events.push({ level: "bad", title: "Slurm down node", detail: `${downNodes}개 노드 확인 필요` });
+  if (pending > 0) events.push({ level: "busy", title: "대기 작업 존재", detail: `${Math.round(pending)}개 작업이 대기 중입니다.` });
+  if (disk >= 75) events.push({ level: disk >= 90 ? "bad" : "warn", title: "디스크 사용률 상승", detail: `${Math.round(disk)}% 사용 중` });
+  if (memory >= 75) events.push({ level: memory >= 90 ? "bad" : "warn", title: "메모리 사용률 상승", detail: `${Math.round(memory)}% 사용 중` });
+  if (!events.length) events.push({ level: "ok", title: "주요 이벤트 없음", detail: "현재 개요 지표가 안정적입니다." });
+
+  const eventList = document.querySelector("#eventList");
+  if (eventList) {
+    eventList.innerHTML = events.slice(0, 5).map((event) => `
+      <div class="event ${event.level}">
+        <span></span>
+        <div>
+          <strong>${escapeHtml(event.title)}</strong>
+          <small>${escapeHtml(event.detail)}</small>
+        </div>
+      </div>
+    `).join("");
+  }
+}
+
+function targetStats(jobName) {
+  const matches = latestTargets.filter((target) => String(target.job || "").toLowerCase().includes(jobName));
+  const up = matches.filter((target) => target.health === "up").length;
+  return { total: matches.length, up, down: Math.max(matches.length - up, 0) };
+}
+
+function thermalLevel(value) {
+  if (!Number.isFinite(value) || value <= 0) return { label: "N/A", className: "unknown", detail: "온도 센서 없음" };
+  if (value >= 85) return { label: "위험", className: "bad", detail: "즉시 확인 필요" };
+  if (value >= 75) return { label: "주의", className: "warn", detail: "냉각 상태 확인 권장" };
+  return { label: "정상", className: "ok", detail: "온도 범위 안정" };
+}
+
+function renderPowerInsights(summary, system) {
+  const gpuTemp = Number(summary?.max_gpu_temp_celsius || 0);
+  const gpuPower = Number(summary?.gpu_power_watts || 0);
+  const serverTemp = Number(system?.temperature?.max_celsius || 0);
+  const maxTemp = Math.max(gpuTemp, serverTemp);
+  const thermal = thermalLevel(maxTemp);
+  const dcgm = targetStats("dcgm");
+  const ipmi = targetStats("ipmi");
+  const sensorCount = system?.temperature?.readings?.length || 0;
+
+  setText("#thermalStatusMetric", thermal.label);
+  setText("#thermalStatusDetail", thermal.detail);
+  setText("#powerGpuTempMetric", gpuTemp > 0 ? `${Math.round(gpuTemp)}°C` : "N/A");
+  setText("#powerGpuWattMetric", gpuPower > 0 ? `${Math.round(gpuPower)} W` : "N/A");
+  setText("#powerServerTempMetric", serverTemp > 0 ? `${Math.round(serverTemp)}°C` : "N/A");
+  setText("#ipmiMetric", ipmi.total ? `${ipmi.up}/${ipmi.total}` : "N/A");
+  setText("#ipmiDetail", ipmi.total ? `${ipmi.down} down` : "target 없음");
+  setText("#dcgmTargets", dcgm.total ? `${dcgm.up}/${dcgm.total}` : "N/A");
+  setText("#dcgmSignal", dcgm.total ? `${dcgm.up}/${dcgm.total} up` : "미감지");
+  setText("#ipmiSignal", ipmi.total ? `${ipmi.up}/${ipmi.total} up` : "미감지");
+  setText("#sensorSignal", sensorCount ? `${sensorCount} sensors` : "미감지");
+
+  const badge = document.querySelector("#thermalBadge");
+  if (badge) {
+    badge.textContent = thermal.label;
+    badge.className = `health-badge ${thermal.className}`;
+  }
+  const gauge = document.querySelector("#thermalGauge");
+  if (gauge) {
+    gauge.style.setProperty("--thermal-pct", String(Math.max(0, Math.min(100, maxTemp || 0))));
+    gauge.className = `thermal-gauge ${thermal.className}`;
+  }
+  setText("#thermalGaugeValue", maxTemp > 0 ? `${Math.round(maxTemp)}°C` : "N/A");
+
+  const sensorList = document.querySelector("#sensorList");
+  if (sensorList) {
+    const readings = system?.temperature?.readings || [];
+    if (!readings.length) {
+      renderEmptyInline("#sensorList", "센서 데이터 없음", "OS 또는 컨테이너가 온도 센서를 노출하면 표시됩니다.");
+    } else {
+      sensorList.innerHTML = readings.slice(0, 8).map((sensor) => `
+        <div class="sensor-row">
+          <div>
+            <strong>${escapeHtml(sensor.label || sensor.chip || "-")}</strong>
+            <span>${escapeHtml(sensor.chip || "-")}</span>
+          </div>
+          <b>${Math.round(sensor.current_celsius)}°C</b>
+        </div>
+      `).join("");
+    }
+  }
+
+  const events = [];
+  if (!dcgm.total) events.push({ level: "info", title: "DCGM target 없음", detail: "GPU 온도/전력은 DCGM exporter 연결 후 표시됩니다." });
+  if (dcgm.down) events.push({ level: "warn", title: "DCGM target down", detail: `${dcgm.down}개 target 확인 필요` });
+  if (!ipmi.total) events.push({ level: "info", title: "IPMI target 없음", detail: "서버 전력/흡기 온도 계측은 IPMI exporter가 필요합니다." });
+  if (ipmi.down) events.push({ level: "warn", title: "IPMI target down", detail: `${ipmi.down}개 target 확인 필요` });
+  if (!sensorCount) events.push({ level: "info", title: "로컬 온도 센서 없음", detail: "컨테이너 권한 또는 하드웨어 센서 노출을 확인하세요." });
+  if (thermal.className === "warn" || thermal.className === "bad") events.push({ level: thermal.className, title: `열 상태 ${thermal.label}`, detail: `${Math.round(maxTemp)}°C 감지` });
+  if (!events.length) events.push({ level: "ok", title: "전력/온도 이벤트 없음", detail: "수집된 전력/온도 신호가 안정적입니다." });
+
+  const eventList = document.querySelector("#powerEventList");
+  if (eventList) {
+    eventList.innerHTML = events.slice(0, 5).map((event) => `
+      <div class="event ${event.level}">
+        <span></span>
+        <div>
+          <strong>${escapeHtml(event.title)}</strong>
+          <small>${escapeHtml(event.detail)}</small>
+        </div>
+      </div>
+    `).join("");
+  }
+}
+
+function updateMetrics(summary, system) {
+  const systemCpu = Number(system?.cpu?.usage_percent);
+  const slurmCpu = Number(summary?.cpu_usage_percent);
+  const cpu = Number.isFinite(systemCpu) ? systemCpu : slurmCpu;
+  const gpu = Number(summary?.gpu_usage_percent ?? 0);
+  const temp = Number(summary?.max_gpu_temp_celsius ?? 0);
+  const power = Number(summary?.gpu_power_watts ?? 0);
+  const pending = Number(summary?.jobs_pending ?? 0);
+  const serverTemp = Number(system?.temperature?.max_celsius ?? 0);
+  const netRate = Number(system?.network?.rx_bytes_per_sec ?? 0) + Number(system?.network?.tx_bytes_per_sec ?? 0);
+  const logicalCores = Number(system?.cpu?.logical_count || 0);
+  const physicalCores = Number(system?.cpu?.physical_count || 0);
+
+  setText("#cpuMetric", formatPercent(cpu));
+  setText("#gpuMetric", gpu > 0 ? formatPercent(gpu) : "N/A");
+  setText("#queueMetric", String(Math.round(pending)));
+  setText("#tempMetric", temp > 0 ? `${Math.round(temp)}°C` : "N/A");
+  setText("#powerMetric", power > 0 ? `${Math.round(power)} W` : "N/A");
+  setText("#thermalTemp", temp > 0 ? `${Math.round(temp)}°C` : "N/A");
+  setText("#thermalPower", power > 0 ? `${Math.round(power)} W` : "N/A");
+  setText("#memMetric", Number.isFinite(system?.memory?.usage_percent) ? `${Math.round(system.memory.usage_percent)}%` : "N/A");
+  setText("#memDetail", system?.memory ? `${formatBytes(system.memory.used_bytes)} / ${formatBytes(system.memory.total_bytes)}` : "local server");
+  setText("#diskMetric", Number.isFinite(system?.disk?.usage_percent) ? `${Math.round(system.disk.usage_percent)}%` : "N/A");
+  setText("#diskDetail", system?.disk ? `${formatBytes(system.disk.used_bytes)} / ${formatBytes(system.disk.total_bytes)}` : "local server");
+  setText("#netMetric", netRate > 0 ? formatRate(netRate) : "0 B/s");
+  setText("#serverTempMetric", serverTemp > 0 ? `${Math.round(serverTemp)}°C` : "N/A");
+  setText("#timeMetric", formatClock(system?.time));
+  setText("#hostMetric", system?.hostname || "local server");
+  setText("#uptimeMetric", system?.uptime_human || "-");
+  setText("#bootShortMetric", system?.boot_time ? `boot ${formatDateShort(system.boot_time)}` : "boot time");
+  setText("#coresMetric", logicalCores ? `${logicalCores}` : "-");
+  setText("#coresDetailMetric", physicalCores ? `${physicalCores} physical` : "logical cores");
+  setText("#cpuMetricDetail", formatPercent(cpu));
+  setText("#cpuDetail", system?.cpu ? `${system.cpu.logical_count} logical / ${system.cpu.physical_count || "-"} physical` : "logical cores");
+  setText("#memMetricDetail", Number.isFinite(system?.memory?.usage_percent) ? `${Math.round(system.memory.usage_percent)}%` : "N/A");
+  setText("#memDetailDetail", system?.memory ? `${formatBytes(system.memory.available_bytes)} available` : "local server");
+  setText("#diskMetricDetail", Number.isFinite(system?.disk?.usage_percent) ? `${Math.round(system.disk.usage_percent)}%` : "N/A");
+  setText("#diskDetailDetail", system?.disk ? `${system.disk.path} / ${formatBytes(system.disk.free_bytes)} free` : "local server");
+  setText("#thermalServerTemp", serverTemp > 0 ? `${Math.round(serverTemp)}°C` : "N/A");
+  setText("#loadDetail", system?.cpu ? `${system.cpu.load1} / ${system.cpu.load5} / ${system.cpu.load15}` : "-");
+  setText("#rxDetail", system?.network ? formatRate(system.network.rx_bytes_per_sec) : "-");
+  setText("#txDetail", system?.network ? formatRate(system.network.tx_bytes_per_sec) : "-");
+  setText("#bootDetail", system?.boot_time ? new Date(system.boot_time).toLocaleString("ko-KR") : "-");
+  setText("#diskReadRate", system?.disk_io ? formatRate(system.disk_io.read_bytes_per_sec) : "-");
+  setText("#diskWriteRate", system?.disk_io ? formatRate(system.disk_io.write_bytes_per_sec) : "-");
+  setText("#diskReadTotal", system?.disk_io ? `${formatBytes(system.disk_io.read_bytes)} total` : "total");
+  setText("#diskWriteTotal", system?.disk_io ? `${formatBytes(system.disk_io.write_bytes)} total` : "total");
+  setText("#cpuBarText", formatPercent(cpu));
+  setText("#memBarText", Number.isFinite(system?.memory?.usage_percent) ? `${Math.round(system.memory.usage_percent)}%` : "N/A");
+  setText("#diskBarText", Number.isFinite(system?.disk?.usage_percent) ? `${Math.round(system.disk.usage_percent)}%` : "N/A");
+  setText("#gpuBarText", gpu > 0 ? formatPercent(gpu) : "N/A");
+  setWidth("#cpuBar", cpu);
+  setWidth("#memBar", system?.memory?.usage_percent);
+  setWidth("#diskBar", system?.disk?.usage_percent);
+  setWidth("#gpuBar", gpu);
+  if (document.querySelector("#cpuSpark")) drawSparkline(document.querySelector("#cpuSpark"), [0, 0, 0, cpu, cpu, cpu, cpu], "#0b6f7a");
+  if (document.querySelector("#gpuSpark")) drawSparkline(document.querySelector("#gpuSpark"), [0, 0, 0, gpu, gpu, gpu, gpu], "#4b62b5");
+  drawThermalChart(temp > 0 ? [45, 52, 57, 63, 61, 67, temp, temp] : serverTemp > 0 ? [serverTemp, serverTemp, serverTemp, serverTemp] : []);
+  drawLoadChart(system);
+  renderFilesystems(system?.filesystems || []);
+  renderOverviewInsights(summary, system);
+  renderPowerInsights(summary, system);
+}
+
+function updateScriptFromForm() {
+  const data = new FormData(jobForm);
+  const gpu = Number(data.get("gpu"));
+  const gpuLine = gpu > 0 ? `#SBATCH --gres=gpu:${gpu}\n` : "";
+  const body = gpu > 0 ? "nvidia-smi\nhostname\ndate" : "hostname\ndate";
+  jobForm.elements.script.value = `#!/bin/bash
+#SBATCH --job-name=${data.get("name")}
+#SBATCH --partition=${data.get("partition")}
+${gpuLine}#SBATCH --cpus-per-task=${data.get("cpu")}
+#SBATCH --mem=${data.get("memory")}
+#SBATCH --time=${data.get("time")}
+
+${body}`;
+}
+
+async function refreshData() {
+  const [summary, system, nodeData, jobData, targetData] = await Promise.all([
+    loadOptional("/api/summary", {}),
+    loadOptional("/api/system", {}),
+    loadOptional("/api/nodes", { nodes: [] }),
+    loadOptional("/api/jobs", { jobs: [] }),
+    loadOptional("/api/targets", { targets: [] })
+  ]);
+
+  latestSummary = summary.unavailable ? null : summary;
+  latestSystem = system.unavailable ? null : system;
+  latestNodes = nodeData.nodes || [];
+  latestTargets = targetData.targets || [];
+  jobs = jobData.jobs || [];
+  racks = groupNodes(latestNodes);
+
+  updateMetrics(latestSummary, latestSystem);
+  renderRacks(document.querySelector(".segmented button.active")?.dataset.filter || "all");
+  renderNodeInsights();
+  renderJobs(searchInput.value);
+  renderAlerts();
+
+  const connected = !summary.unavailable || !system.unavailable || !nodeData.unavailable || !jobData.unavailable || !targetData.unavailable;
+  setApiState(connected ? "Live API" : "No API", connected);
+}
+
+function switchView(view) {
+  document.querySelectorAll(".view").forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.viewPanel === view);
+  });
+  viewTitle.textContent = viewTitles[view] || "D-aquila";
+  document.querySelector(".main").scrollTop = 0;
+}
+
+document.querySelector("#openSubmit").addEventListener("click", () => submitDialog.showModal());
+document.querySelector("#closeSubmit").addEventListener("click", () => submitDialog.close());
+document.querySelector("#previewScript").addEventListener("click", updateScriptFromForm);
+
+jobForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const data = new FormData(jobForm);
+  const payload = {
+    name: data.get("name"),
+    partition: data.get("partition"),
+    cpu: Number(data.get("cpu")),
+    gpu: Number(data.get("gpu")),
+    memory: data.get("memory"),
+    time: data.get("time"),
+    script: data.get("script")
+  };
+
+  try {
+    await apiPost("/api/jobs/submit", payload);
+    await refreshData();
+    submitDialog.close();
+  } catch (error) {
+    alert(`작업 제출 실패: ${error.message}`);
+  }
+});
+
+document.querySelector("#refreshJobs").addEventListener("click", async () => {
+  await refreshData();
+});
+
+document.querySelectorAll(".segmented button").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll(".segmented button").forEach((item) => item.classList.remove("active"));
+    button.classList.add("active");
+    renderRacks(button.dataset.filter);
+  });
+});
+
+document.querySelectorAll(".nav-item").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll(".nav-item").forEach((item) => item.classList.remove("active"));
+    button.classList.add("active");
+    switchView(button.dataset.view);
+  });
+});
+
+searchInput.addEventListener("input", (event) => renderJobs(event.target.value));
+
+loginForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const data = new FormData(loginForm);
+  loginMessage.textContent = "로그인 확인 중입니다.";
+  try {
+    const auth = await apiPost("/api/auth/login", {
+      username: data.get("username"),
+      password: data.get("password")
+    });
+    loginForm.reset();
+    showApp(auth.username);
+    await refreshData();
+    refreshTimer = setInterval(refreshData, 15000);
+  } catch (error) {
+    loginMessage.textContent = error.message.includes("PAM")
+      ? "이 실행 환경에서는 OS 계정 인증을 사용할 수 없습니다. 로그인 노드에서 실행하세요."
+      : "로그인 실패: OS 계정과 비밀번호를 확인하세요.";
+  }
+});
+
+document.querySelector("#logoutButton")?.addEventListener("click", async () => {
+  try {
+    await apiPost("/api/auth/logout", {});
+  } finally {
+    showLogin("로그아웃되었습니다.");
+  }
+});
+
+checkAuth();

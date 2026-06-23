@@ -1,0 +1,10 @@
+.git
+.agents
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.log
+node_modules
+dist
+build

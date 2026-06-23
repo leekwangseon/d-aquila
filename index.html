@@ -1,0 +1,625 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>D-aquila | HPC Operations Platform</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <section class="login-screen" id="loginScreen">
+      <form class="login-card" id="loginForm">
+        <div class="brand login-brand">
+          <div class="brand-mark" aria-hidden="true"><span></span></div>
+          <div>
+            <strong>D-aquila</strong>
+            <small>DASAN DATA HPC</small>
+          </div>
+        </div>
+        <div>
+          <p class="eyebrow">OS account login</p>
+          <h1>운영 노드 계정으로 로그인</h1>
+          <p>현재 서버의 Linux/PAM 계정을 사용합니다.</p>
+        </div>
+        <label>계정<input name="username" autocomplete="username" required /></label>
+        <label>비밀번호<input name="password" type="password" autocomplete="current-password" required /></label>
+        <button class="primary-action" type="submit">로그인</button>
+        <small class="login-message" id="loginMessage">로그인 후 D-aquila 관제 화면이 열립니다.</small>
+      </form>
+    </section>
+
+    <div class="app-shell locked" id="appShell">
+      <aside class="sidebar" aria-label="D-aquila navigation">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true"><span></span></div>
+          <div>
+            <strong>D-aquila</strong>
+            <small>DASAN DATA HPC</small>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <button class="nav-item active" type="button" data-view="overview">
+            <span class="icon">O</span>
+            <span>개요</span>
+          </button>
+          <button class="nav-item" type="button" data-view="resources">
+            <span class="icon">R</span>
+            <span>리소스</span>
+          </button>
+          <button class="nav-item" type="button" data-view="jobs">
+            <span class="icon">J</span>
+            <span>작업</span>
+          </button>
+          <button class="nav-item" type="button" data-view="nodes">
+            <span class="icon">N</span>
+            <span>노드</span>
+          </button>
+          <button class="nav-item" type="button" data-view="power">
+            <span class="icon">P</span>
+            <span>전력/온도</span>
+          </button>
+        </nav>
+
+        <div class="cluster-health">
+          <span class="pulse"></span>
+          <div>
+            <strong id="apiState">Connecting</strong>
+            <small>System / Slurm / Prometheus</small>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Bird's-eye command center</p>
+            <h1 id="viewTitle">운영 개요</h1>
+          </div>
+          <div class="topbar-actions">
+            <label class="search">
+              <span>Q</span>
+              <input id="searchInput" type="search" placeholder="노드, 작업, 사용자 검색" />
+            </label>
+            <button class="primary-action" id="openSubmit" type="button">
+              <span>+</span>
+              작업 제출
+            </button>
+            <button class="ghost-action" id="logoutButton" type="button">로그아웃</button>
+          </div>
+        </header>
+
+        <section class="view active" data-view-panel="overview">
+          <section class="status-grid" aria-label="Operations summary">
+            <article class="metric">
+              <span class="metric-label">CPU 사용률</span>
+              <strong id="cpuMetric">-</strong>
+              <canvas class="sparkline" id="cpuSpark" width="180" height="48"></canvas>
+            </article>
+            <article class="metric">
+              <span class="metric-label">메모리 사용률</span>
+              <strong id="memMetric">-</strong>
+              <small id="memDetail">local server</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">디스크 사용률</span>
+              <strong id="diskMetric">-</strong>
+              <small id="diskDetail">local server</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">대기 작업</span>
+              <strong id="queueMetric">-</strong>
+              <small>Slurm queue</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">업타임</span>
+              <strong id="uptimeMetric">-</strong>
+              <small id="bootShortMetric">boot time</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">전체 코어</span>
+              <strong id="coresMetric">-</strong>
+              <small id="coresDetailMetric">logical cores</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">현재 시간</span>
+              <strong id="timeMetric">-</strong>
+              <small id="hostMetric">local server</small>
+            </article>
+          </section>
+
+          <section class="dashboard-grid">
+            <article class="panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>리소스 사용량</h2>
+                  <p>단독 서버와 클러스터 환경 모두에서 핵심 자원을 추적합니다.</p>
+                </div>
+              </div>
+              <div class="resource-bars">
+                <div class="bar-row"><span>CPU</span><div class="bar"><i id="cpuBar"></i></div><strong id="cpuBarText">-</strong></div>
+                <div class="bar-row"><span>Memory</span><div class="bar"><i id="memBar"></i></div><strong id="memBarText">-</strong></div>
+                <div class="bar-row"><span>Disk</span><div class="bar"><i id="diskBar"></i></div><strong id="diskBarText">-</strong></div>
+                <div class="bar-row"><span>GPU</span><div class="bar gpu-bar"><i id="gpuBar"></i></div><strong id="gpuBarText">-</strong></div>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>알림</h2>
+                  <p>장애 노드와 Prometheus target 문제를 요약합니다.</p>
+                </div>
+                <span class="badge soft">Auto</span>
+              </div>
+              <div class="alerts" id="alerts"></div>
+            </article>
+          </section>
+
+          <section class="overview-insights">
+            <article class="panel health-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>운영 상태</h2>
+                  <p>현재 연결 상태와 위험 신호를 종합합니다.</p>
+                </div>
+                <span class="health-badge" id="healthBadge">확인 중</span>
+              </div>
+              <div class="health-score">
+                <strong id="healthTitle">상태 확인 중</strong>
+                <span id="healthDetail">API 데이터를 수집하고 있습니다.</span>
+              </div>
+              <div class="signal-grid">
+                <div><span>API</span><strong id="apiSignal">-</strong></div>
+                <div><span>Slurm</span><strong id="slurmSignal">-</strong></div>
+                <div><span>Prometheus</span><strong id="promSignal">-</strong></div>
+              </div>
+            </article>
+
+            <article class="panel pressure-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>자원 압박도</h2>
+                  <p>가장 높은 사용률 기준으로 혼잡도를 판단합니다.</p>
+                </div>
+              </div>
+              <div class="pressure-meter">
+                <div class="pressure-fill" id="pressureFill"></div>
+                <strong id="pressureValue">-</strong>
+              </div>
+              <div class="pressure-meta">
+                <span id="pressureLabel">데이터 수집 중</span>
+                <small id="pressureSource">CPU / Memory / Disk / GPU</small>
+              </div>
+            </article>
+
+            <article class="panel profile-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>서버 프로필</h2>
+                  <p>단독 서버와 클러스터 모드를 자동으로 구분합니다.</p>
+                </div>
+                <span class="mode-pill" id="modePill">-</span>
+              </div>
+              <div class="profile-grid">
+                <div><span>Host</span><strong id="profileHost">-</strong></div>
+                <div><span>IP</span><strong id="profileIp">-</strong></div>
+                <div><span>OS</span><strong id="profileOs">-</strong></div>
+                <div><span>GPU</span><strong id="profileGpu">-</strong></div>
+              </div>
+            </article>
+
+            <article class="panel timeline-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>최근 이벤트</h2>
+                  <p>지금 확인할 만한 운영 신호입니다.</p>
+                </div>
+              </div>
+              <div class="event-list" id="eventList"></div>
+            </article>
+          </section>
+        </section>
+
+        <section class="view" data-view-panel="resources">
+          <section class="status-grid">
+            <article class="metric">
+              <span class="metric-label">CPU 사용률</span>
+              <strong id="cpuMetricDetail">-</strong>
+              <small id="cpuDetail">logical cores</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">메모리</span>
+              <strong id="memMetricDetail">-</strong>
+              <small id="memDetailDetail">local server</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">디스크</span>
+              <strong id="diskMetricDetail">-</strong>
+              <small id="diskDetailDetail">local server</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">네트워크</span>
+              <strong id="netMetric">-</strong>
+              <small>RX + TX</small>
+            </article>
+            <article class="metric warn">
+              <span class="metric-label">서버 온도</span>
+              <strong id="serverTempMetric">-</strong>
+              <small>local sensor</small>
+            </article>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header compact">
+              <div>
+                <h2>상세 리소스</h2>
+                <p>CPU load, 메모리, 디스크, 네트워크 사용량을 단독 서버 기준으로 표시합니다.</p>
+              </div>
+            </div>
+            <div class="detail-grid">
+              <div><span>Load Average</span><strong id="loadDetail">-</strong></div>
+              <div><span>Network RX</span><strong id="rxDetail">-</strong></div>
+              <div><span>Network TX</span><strong id="txDetail">-</strong></div>
+              <div><span>Boot Time</span><strong id="bootDetail">-</strong></div>
+            </div>
+          </section>
+
+          <section class="resource-detail-grid">
+            <article class="panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>파일 시스템 사용률</h2>
+                  <p>마운트 포인트별 사용량을 표시합니다.</p>
+                </div>
+              </div>
+              <div class="filesystem-list" id="filesystemList"></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>디스크 I/O</h2>
+                  <p>현재 서버의 읽기/쓰기 처리량입니다.</p>
+                </div>
+              </div>
+              <div class="io-grid">
+                <div><span>Read</span><strong id="diskReadRate">-</strong><small id="diskReadTotal">total</small></div>
+                <div><span>Write</span><strong id="diskWriteRate">-</strong><small id="diskWriteTotal">total</small></div>
+              </div>
+            </article>
+
+            <article class="panel load-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>시스템 로드 평균</h2>
+                  <p>1분 load average를 시간 흐름으로 표시합니다.</p>
+                </div>
+              </div>
+              <canvas class="load-chart" id="loadChart" width="640" height="180"></canvas>
+            </article>
+          </section>
+        </section>
+
+        <section class="view" data-view-panel="jobs">
+          <section class="status-grid job-status-grid">
+            <article class="metric">
+              <span class="metric-label">전체 작업</span>
+              <strong id="jobTotalMetric">-</strong>
+              <small>visible queue</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">실행 중</span>
+              <strong id="jobRunningMetric">-</strong>
+              <small>RUNNING</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">대기 중</span>
+              <strong id="jobPendingMetric">-</strong>
+              <small>PENDING</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">요청 CPU</span>
+              <strong id="jobCpuMetric">-</strong>
+              <small>sum requested</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">요청 GPU</span>
+              <strong id="jobGpuMetric">-</strong>
+              <small>sum requested</small>
+            </article>
+          </section>
+
+          <section class="job-insights">
+            <article class="panel queue-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>큐 상태 분포</h2>
+                  <p>현재 작업 상태를 비율로 요약합니다.</p>
+                </div>
+              </div>
+              <div class="queue-bars" id="jobStateBars"></div>
+            </article>
+
+            <article class="panel user-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>사용자별 점유</h2>
+                  <p>작업 수 기준 상위 사용자를 표시합니다.</p>
+                </div>
+              </div>
+              <div class="ranking-list" id="jobUserList"></div>
+            </article>
+
+            <article class="panel partition-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>파티션별 큐</h2>
+                  <p>파티션별 실행/대기 작업을 비교합니다.</p>
+                </div>
+              </div>
+              <div class="ranking-list" id="jobPartitionList"></div>
+            </article>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header compact">
+              <div>
+                <h2>Slurm 작업 현황</h2>
+                <p>squeue에서 가져온 작업 상태와 자원 요청량을 추적합니다.</p>
+              </div>
+              <button class="ghost-action" id="refreshJobs" type="button">새로고침</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Job ID</th>
+                    <th>사용자</th>
+                    <th>파티션</th>
+                    <th>상태</th>
+                    <th>자원</th>
+                    <th>남은 시간</th>
+                  </tr>
+                </thead>
+                <tbody id="jobTable"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" data-view-panel="nodes">
+          <section class="status-grid node-status-grid">
+            <article class="metric">
+              <span class="metric-label">전체 노드</span>
+              <strong id="nodeTotalMetric">-</strong>
+              <small>Slurm nodes</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">가동 노드</span>
+              <strong id="nodeActiveMetric">-</strong>
+              <small>alloc / mix / idle</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">문제 노드</span>
+              <strong id="nodeWarnMetric">-</strong>
+              <small>down / drain / fail</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">CPU 할당률</span>
+              <strong id="nodeCpuMetric">-</strong>
+              <small id="nodeCpuDetail">allocated / total</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">GPU 할당률</span>
+              <strong id="nodeGpuMetric">-</strong>
+              <small id="nodeGpuDetail">allocated / total</small>
+            </article>
+          </section>
+
+          <section class="node-insights">
+            <article class="panel node-health-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>노드 상태 분포</h2>
+                  <p>가동, 할당, 경고, 장애 상태를 색으로 구분합니다.</p>
+                </div>
+              </div>
+              <div class="node-state-bars" id="nodeStateBars"></div>
+            </article>
+
+            <article class="panel node-gpu-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>GPU 풀</h2>
+                  <p>GPU 노드의 할당량과 여유량을 요약합니다.</p>
+                </div>
+              </div>
+              <div class="gpu-pool" id="gpuPool"></div>
+            </article>
+          </section>
+
+          <section class="panel skyline">
+            <div class="panel-header">
+              <div>
+                <h2>클러스터 노드</h2>
+                <p>Slurm 노드 상태와 CPU/GPU 배정량을 그룹별로 표시합니다.</p>
+              </div>
+              <div class="segmented" aria-label="Node filter">
+                <button class="active" type="button" data-filter="all">전체</button>
+                <button type="button" data-filter="gpu">GPU</button>
+                <button type="button" data-filter="warn">주의</button>
+              </div>
+            </div>
+            <div class="rack-map" id="rackMap" aria-label="Rack and node map"></div>
+          </section>
+
+          <section class="panel node-table-panel">
+            <div class="panel-header compact">
+              <div>
+                <h2>노드 상세</h2>
+                <p>CPU/GPU 할당량, 상태, 파티션을 노드별로 확인합니다.</p>
+              </div>
+            </div>
+            <div class="node-card-list" id="nodeCardList"></div>
+          </section>
+        </section>
+
+        <section class="view" data-view-panel="power">
+          <section class="status-grid power-status-grid">
+            <article class="metric">
+              <span class="metric-label">열 상태</span>
+              <strong id="thermalStatusMetric">-</strong>
+              <small id="thermalStatusDetail">GPU / server</small>
+            </article>
+            <article class="metric warn">
+              <span class="metric-label">GPU 최고 온도</span>
+              <strong id="powerGpuTempMetric">N/A</strong>
+              <small>DCGM exporter</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">GPU 전력 합계</span>
+              <strong id="powerGpuWattMetric">N/A</strong>
+              <small>DCGM exporter</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">서버 온도</span>
+              <strong id="powerServerTempMetric">N/A</strong>
+              <small>local sensor</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">IPMI Target</span>
+              <strong id="ipmiMetric">-</strong>
+              <small id="ipmiDetail">Prometheus</small>
+            </article>
+          </section>
+
+          <section class="power-insights">
+            <article class="panel thermal-gauge-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>열 위험도</h2>
+                  <p>GPU와 서버 센서 중 가장 높은 온도를 기준으로 판단합니다.</p>
+                </div>
+                <span class="health-badge" id="thermalBadge">확인 중</span>
+              </div>
+              <div class="thermal-gauge" id="thermalGauge">
+                <strong id="thermalGaugeValue">N/A</strong>
+                <span>max Celsius</span>
+              </div>
+            </article>
+
+            <article class="panel exporter-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>전력 데이터 소스</h2>
+                  <p>DCGM, IPMI, 로컬 센서 연결 상태입니다.</p>
+                </div>
+              </div>
+              <div class="signal-grid power-signal-grid">
+                <div><span>DCGM</span><strong id="dcgmSignal">-</strong></div>
+                <div><span>IPMI</span><strong id="ipmiSignal">-</strong></div>
+                <div><span>Local Sensor</span><strong id="sensorSignal">-</strong></div>
+              </div>
+            </article>
+          </section>
+
+          <section class="dashboard-grid">
+            <article class="panel">
+              <div class="panel-header compact">
+                <h2>전력 / 온도</h2>
+                <span class="badge">Live</span>
+              </div>
+              <canvas class="chart" id="thermalChart" width="640" height="240"></canvas>
+              <div class="thermal-list">
+                <div><span>GPU Temp</span><strong id="thermalTemp">N/A</strong><em>max</em></div>
+                <div><span>GPU Power</span><strong id="thermalPower">N/A</strong><em>sum</em></div>
+                <div><span>Server Temp</span><strong id="thermalServerTemp">N/A</strong><em>local</em></div>
+                <div><span>DCGM Targets</span><strong id="dcgmTargets">N/A</strong><em>up</em></div>
+              </div>
+            </article>
+            <article class="panel eagle-panel">
+              <div class="eagle-visual" aria-hidden="true">
+                <div class="wing left-wing"></div>
+                <div class="wing right-wing"></div>
+                <div class="body"></div>
+                <div class="eye"></div>
+              </div>
+              <h2>D-aquila</h2>
+              <p>DASAN DATA의 D와 독수리 Aquila의 시야를 담은 HPC 통합 관제 플랫폼입니다.</p>
+            </article>
+          </section>
+
+          <section class="power-detail-grid">
+            <article class="panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>센서 상세</h2>
+                  <p>OS가 노출한 온도 센서 목록입니다.</p>
+                </div>
+              </div>
+              <div class="sensor-list" id="sensorList"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>전력/온도 알림</h2>
+                  <p>전력 계측과 온도 수집에서 확인할 항목입니다.</p>
+                </div>
+              </div>
+              <div class="event-list" id="powerEventList"></div>
+            </article>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <dialog class="submit-dialog" id="submitDialog">
+      <form method="dialog" class="submit-form" id="jobForm">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow">Slurm submission</p>
+            <h2>작업 제출</h2>
+          </div>
+          <button class="icon-button" value="cancel" type="button" id="closeSubmit" title="닫기">x</button>
+        </div>
+
+        <div class="form-grid">
+          <label>작업 이름<input name="name" value="example-job" required /></label>
+          <label>
+            파티션
+            <select name="partition">
+              <option>cpu</option>
+              <option>gpu</option>
+              <option>batch</option>
+            </select>
+          </label>
+          <label>CPU 코어<input name="cpu" type="number" min="1" max="1024" value="1" /></label>
+          <label>GPU 개수<input name="gpu" type="number" min="0" max="16" value="0" /></label>
+          <label>메모리<input name="memory" value="1G" /></label>
+          <label>제한 시간<input name="time" value="00:10:00" /></label>
+        </div>
+
+        <label class="script-field">
+          Slurm 스크립트
+          <textarea name="script" rows="9">#!/bin/bash
+#SBATCH --job-name=example-job
+#SBATCH --partition=cpu
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=1G
+#SBATCH --time=00:10:00
+
+hostname
+date</textarea>
+        </label>
+
+        <div class="dialog-actions">
+          <button class="ghost-action" type="button" id="previewScript">스크립트 갱신</button>
+          <button class="primary-action" value="submit" type="submit">제출</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
