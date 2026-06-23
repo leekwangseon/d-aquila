@@ -19,15 +19,19 @@ const state = {
 };
 
 const COLORS = {
-  rack: 0x24384a,
-  rail: 0x8ca0b3,
-  idle: 0x8ca0b3,
+  rack: 0x111417,
+  rackSide: 0x1d2227,
+  rail: 0x2e3740,
+  trim: 0x0a0d10,
+  idle: 0x6f8495,
   busy: 0x0b6f7a,
   gpu: 0x4b62b5,
   warn: 0xe5a423,
   down: 0xc93f38,
-  face: 0xf8fafc,
-  accent: 0xd95f43
+  face: 0x9eb0bd,
+  vent: 0x27323a,
+  accent: 0x32a9c7,
+  wheel: 0x080a0c
 };
 
 function nodeType(node) {
@@ -62,6 +66,19 @@ function addBox(parent, size, position, material, name = "") {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
   mesh.position.set(...position);
   mesh.name = name;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+
+function addCylinder(parent, radius, depth, position, material, rotation = [0, 0, 0], name = "") {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, depth, 24), material);
+  mesh.position.set(...position);
+  mesh.rotation.set(...rotation);
+  mesh.name = name;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
   parent.add(mesh);
   return mesh;
 }
@@ -82,11 +99,11 @@ function initScene() {
   state.renderer.shadowMap.enabled = true;
   state.stage.appendChild(state.renderer.domElement);
 
-  const ambient = new THREE.HemisphereLight(0xffffff, 0x9aa8b5, 1.65);
+  const ambient = new THREE.HemisphereLight(0xffffff, 0x9aa8b5, 1.35);
   state.scene.add(ambient);
 
   const key = new THREE.DirectionalLight(0xffffff, 2.4);
-  key.position.set(4, 7, 6);
+  key.position.set(4, 7, 7);
   key.castShadow = true;
   state.scene.add(key);
 
@@ -95,13 +112,17 @@ function initScene() {
   state.scene.add(fill);
 
   const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(12, 9),
-    new THREE.MeshStandardMaterial({ color: 0xdfe7ef, roughness: 0.8, metalness: 0.05 })
+    new THREE.PlaneGeometry(14, 11),
+    new THREE.MeshStandardMaterial({ color: 0xf4f6f8, roughness: 0.82, metalness: 0.02 })
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = -3.05;
   floor.receiveShadow = true;
   state.scene.add(floor);
+
+  const grid = new THREE.GridHelper(14, 28, 0x8c98a3, 0xcfd6dd);
+  grid.position.y = -3.045;
+  state.scene.add(grid);
 
   state.rackGroup = new THREE.Group();
   state.scene.add(state.rackGroup);
@@ -162,44 +183,114 @@ function clearRack() {
 
 function buildRack(nodes) {
   clearRack();
-  const rackMat = createMaterial(COLORS.rack, 0.38, 0.36);
-  const railMat = createMaterial(COLORS.rail, 0.45, 0.22);
-  const depth = 1.5;
+  const rackMat = createMaterial(COLORS.rack, 0.32, 0.42);
+  const sideMat = createMaterial(COLORS.rackSide, 0.48, 0.24);
+  const trimMat = createMaterial(COLORS.trim, 0.28, 0.48);
+  const railMat = createMaterial(COLORS.rail, 0.45, 0.28);
+  const depth = 1.95;
   const height = 5.7;
-  const width = 2.6;
+  const width = 2.75;
+  const frontZ = depth / 2;
 
-  addBox(state.rackGroup, [0.12, height, 0.12], [-width / 2, 0, -depth / 2], railMat);
-  addBox(state.rackGroup, [0.12, height, 0.12], [width / 2, 0, -depth / 2], railMat);
-  addBox(state.rackGroup, [0.12, height, 0.12], [-width / 2, 0, depth / 2], railMat);
-  addBox(state.rackGroup, [0.12, height, 0.12], [width / 2, 0, depth / 2], railMat);
-  addBox(state.rackGroup, [width + 0.22, 0.12, depth + 0.18], [0, height / 2, 0], rackMat);
-  addBox(state.rackGroup, [width + 0.22, 0.12, depth + 0.18], [0, -height / 2, 0], rackMat);
+  addBox(state.rackGroup, [width + 0.28, 0.18, depth + 0.22], [0, height / 2, 0], trimMat);
+  addBox(state.rackGroup, [width + 0.28, 0.2, depth + 0.22], [0, -height / 2, 0], trimMat);
+  addBox(state.rackGroup, [0.16, height, 0.16], [-width / 2, 0, frontZ], rackMat);
+  addBox(state.rackGroup, [0.16, height, 0.16], [width / 2, 0, frontZ], rackMat);
+  addBox(state.rackGroup, [0.18, height, depth], [-width / 2, 0, 0], sideMat);
+  addBox(state.rackGroup, [0.18, height, depth], [width / 2, 0, 0], sideMat);
+  addBox(state.rackGroup, [width, height, 0.16], [0, 0, -depth / 2], sideMat);
+  addBox(state.rackGroup, [0.055, height - 0.46, 0.08], [-width / 2 + 0.24, 0, frontZ + 0.05], railMat);
+  addBox(state.rackGroup, [0.055, height - 0.46, 0.08], [width / 2 - 0.24, 0, frontZ + 0.05], railMat);
+  addSideVents(state.rackGroup, width, depth, height);
+  addWheels(state.rackGroup, width, depth, height);
 
-  const slots = Math.max(nodes.length, 1);
-  const unit = Math.min(0.28, (height - 0.5) / Math.max(slots, 18));
-  const startY = -height / 2 + 0.35;
+  const visibleNodes = nodes.slice(0, 14);
+  const displayNodes = [...visibleNodes];
+  while (displayNodes.length < 10) {
+    displayNodes.push({
+      name: `empty-slot-${displayNodes.length + 1}`,
+      state: "empty",
+      partitions: "blank",
+      cpu_alloc: 0,
+      cpu_total: 0,
+      gpu_alloc: 0,
+      gpu_total: 0,
+      gres: "",
+      reason: "",
+      empty: true
+    });
+  }
+  const slots = Math.max(displayNodes.length, 1);
+  const unit = Math.min(0.42, (height - 0.82) / Math.max(slots, 10));
+  const startY = -height / 2 + 0.55;
 
-  nodes.forEach((node, index) => {
+  displayNodes.forEach((node, index) => {
     const type = nodeType(node);
     const group = new THREE.Group();
     const y = startY + index * unit;
     const isGpu = Number(node.gpu_total || 0) > 0;
-    const serverHeight = isGpu ? unit * 1.55 : unit * 0.82;
-    const mat = createMaterial(COLORS[type] || COLORS.idle, 0.48, 0.2);
-    const faceMat = createMaterial(COLORS.face, 0.65, 0.04);
-    const body = addBox(group, [2.25, Math.max(serverHeight, 0.11), 1.18], [0, y, 0], mat, node.name || `node-${index + 1}`);
-    body.castShadow = true;
-    body.userData.node = node;
-    body.userData.type = type;
-    const face = addBox(group, [2.05, Math.max(serverHeight * 0.72, 0.07), 0.04], [0, y, 0.62], faceMat);
-    face.userData.node = node;
-    face.userData.type = type;
-    addBox(group, [0.18, 0.04, 0.06], [-0.92, y, 0.66], createMaterial(COLORS[type] || COLORS.idle), "status");
-    addBox(group, [0.42, 0.04, 0.06], [0.82, y, 0.66], createMaterial(isGpu ? COLORS.gpu : COLORS.rail), "io");
+    const serverHeight = isGpu ? unit * 0.95 : unit * 0.82;
+    createServer(group, node, type, y, serverHeight, width, frontZ, isGpu);
     state.rackGroup.add(group);
-    state.devices.push(body);
-    state.devices.push(face);
   });
+}
+
+function addSideVents(parent, width, depth, height) {
+  const ventMat = createMaterial(0x0d1013, 0.65, 0.18);
+  [-1, 1].forEach((side) => {
+    for (let i = 0; i < 8; i += 1) {
+      addBox(parent, [0.022, 0.42, 0.035], [side * (width / 2 + 0.094), 0.75 + i * 0.055, -0.2 + i * 0.055], ventMat, "side-vent");
+      addBox(parent, [0.022, 0.42, 0.035], [side * (width / 2 + 0.094), -1.9 + i * 0.055, -0.25 + i * 0.055], ventMat, "side-vent");
+    }
+  });
+}
+
+function addWheels(parent, width, depth, height) {
+  const wheelMat = createMaterial(COLORS.wheel, 0.38, 0.35);
+  const y = -height / 2 - 0.19;
+  const positions = [
+    [-width / 2 + 0.22, y, depth / 2 - 0.22],
+    [width / 2 - 0.22, y, depth / 2 - 0.22],
+    [-width / 2 + 0.22, y, -depth / 2 + 0.22],
+    [width / 2 - 0.22, y, -depth / 2 + 0.22]
+  ];
+  positions.forEach((position) => {
+    addCylinder(parent, 0.11, 0.08, position, wheelMat, [Math.PI / 2, 0, 0], "caster");
+  });
+}
+
+function createServer(group, node, type, y, serverHeight, rackWidth, frontZ, isGpu) {
+  const isEmpty = !!node.empty;
+  const statusColor = COLORS[type] || COLORS.idle;
+  const chassisMat = createMaterial(isEmpty ? 0x171c21 : 0x242b31, 0.5, 0.32);
+  const faceMat = createMaterial(isEmpty ? 0x343d45 : COLORS.face, 0.56, 0.15);
+  const darkMat = createMaterial(0x10151a, 0.58, 0.25);
+  const ventMat = createMaterial(COLORS.vent, 0.66, 0.08);
+  const ledMat = createMaterial(statusColor, 0.28, 0.1);
+  const accentMat = createMaterial(isGpu ? COLORS.gpu : COLORS.accent, 0.36, 0.16);
+  const body = addBox(group, [rackWidth - 0.54, serverHeight, 1.55], [0, y, 0.1], chassisMat, node.name || "server");
+  body.userData.node = node;
+  body.userData.type = type;
+
+  const face = addBox(group, [rackWidth - 0.66, serverHeight * 0.86, 0.055], [0, y, frontZ + 0.09], faceMat, "front-panel");
+  face.userData.node = node;
+  face.userData.type = type;
+
+  addBox(group, [0.12, serverHeight * 0.72, 0.075], [-(rackWidth / 2) + 0.44, y, frontZ + 0.13], accentMat, "accent-strip");
+  addBox(group, [0.5, serverHeight * 0.55, 0.075], [-(rackWidth / 2) + 0.78, y, frontZ + 0.14], ventMat, "left-vent");
+  addBox(group, [0.52, serverHeight * 0.55, 0.075], [(rackWidth / 2) - 0.78, y, frontZ + 0.14], ventMat, "right-vent");
+  addBox(group, [0.3, serverHeight * 0.38, 0.08], [0, y, frontZ + 0.145], darkMat, "handle");
+  addBox(group, [0.08, 0.08, 0.09], [0.34, y + serverHeight * 0.16, frontZ + 0.15], ledMat, "led");
+  addBox(group, [0.08, 0.08, 0.09], [0.48, y + serverHeight * 0.16, frontZ + 0.15], createMaterial(0x34d399, 0.25, 0.05), "led-ok");
+
+  for (let i = 0; i < 5; i += 1) {
+    addBox(group, [0.018, serverHeight * 0.45, 0.082], [-(rackWidth / 2) + 0.62 + i * 0.075, y, frontZ + 0.17], darkMat, "vent-line");
+    addBox(group, [0.018, serverHeight * 0.45, 0.082], [(rackWidth / 2) - 0.94 + i * 0.075, y, frontZ + 0.17], darkMat, "vent-line");
+  }
+
+  if (!isEmpty) {
+    state.devices.push(body, face);
+  }
 }
 
 function pick(event) {
