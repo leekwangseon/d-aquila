@@ -50,7 +50,11 @@ async def auth_middleware(request: Request, call_next):
     if path.startswith("/api/") and path not in public_paths:
         if not session_user(request.cookies.get(SESSION_COOKIE)):
             return JSONResponse({"detail": "Login required"}, status_code=401)
-    return await call_next(request)
+    response = await call_next(request)
+    if not path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    return response
 
 
 class SubmitRequest(BaseModel):
