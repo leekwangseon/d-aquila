@@ -496,6 +496,16 @@
               <strong id="ipmiMetric">-</strong>
               <small id="ipmiDetail">Prometheus</small>
             </article>
+            <article class="metric">
+              <span class="metric-label">냉각 여유</span>
+              <strong id="thermalHeadroomMetric">-</strong>
+              <small>to 85°C risk line</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">계측 신뢰도</span>
+              <strong id="telemetryConfidenceMetric">-</strong>
+              <small id="telemetryConfidenceDetail">DCGM / IPMI / Sensor</small>
+            </article>
           </section>
 
           <section class="power-insights">
@@ -526,12 +536,26 @@
                 <div><span>Local Sensor</span><strong id="sensorSignal">-</strong></div>
               </div>
             </article>
+
+            <article class="panel efficiency-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>전력 효율 신호</h2>
+                  <p>GPU 사용률 대비 전력 소모를 단순 신호로 표시합니다.</p>
+                </div>
+              </div>
+              <div class="efficiency-grid">
+                <div><span>GPU Util</span><strong id="gpuEfficiencyUtil">N/A</strong></div>
+                <div><span>Power / Util</span><strong id="gpuPowerPerUtil">N/A</strong></div>
+                <div><span>Signal</span><strong id="gpuEfficiencySignal">N/A</strong></div>
+              </div>
+            </article>
           </section>
 
-          <section class="dashboard-grid">
+          <section class="power-history-grid">
             <article class="panel">
               <div class="panel-header compact">
-                <h2>전력 / 온도</h2>
+                <h2>온도 추이</h2>
                 <span class="badge">Live</span>
               </div>
               <canvas class="chart" id="thermalChart" width="640" height="240"></canvas>
@@ -542,15 +566,18 @@
                 <div><span>DCGM Targets</span><strong id="dcgmTargets">N/A</strong><em>up</em></div>
               </div>
             </article>
-            <article class="panel eagle-panel">
-              <div class="eagle-visual" aria-hidden="true">
-                <div class="wing left-wing"></div>
-                <div class="wing right-wing"></div>
-                <div class="body"></div>
-                <div class="eye"></div>
+
+            <article class="panel">
+              <div class="panel-header compact">
+                <h2>전력 추이</h2>
+                <span class="badge soft">GPU</span>
               </div>
-              <h2>D-aquila</h2>
-              <p>DASAN DATA의 D와 독수리 Aquila의 시야를 담은 HPC 통합 관제 플랫폼입니다.</p>
+              <canvas class="chart" id="powerChart" width="640" height="240"></canvas>
+              <div class="power-strip">
+                <div><span>Current</span><strong id="powerCurrentStrip">N/A</strong></div>
+                <div><span>Peak</span><strong id="powerPeakStrip">N/A</strong></div>
+                <div><span>Samples</span><strong id="powerSamplesStrip">0</strong></div>
+              </div>
             </article>
           </section>
 

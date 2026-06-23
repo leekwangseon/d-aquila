@@ -1193,9 +1193,20 @@ h2 {
   min-width: 0;
 }
 
+.power-insights {
+  grid-template-columns: minmax(260px, 0.8fr) minmax(280px, 1fr) minmax(260px, 0.9fr);
+}
+
 .power-detail-grid {
   margin-top: 18px;
   margin-bottom: 0;
+}
+
+.power-history-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  min-width: 0;
 }
 
 .thermal-gauge-panel {
@@ -1212,6 +1223,14 @@ h2 {
 
 .exporter-panel::before {
   background: var(--blue);
+}
+
+.efficiency-panel {
+  background: linear-gradient(135deg, #ffffff 0%, #f3f0ff 100%);
+}
+
+.efficiency-panel::before {
+  background: var(--violet);
 }
 
 .thermal-gauge {
@@ -1251,6 +1270,41 @@ h2 {
 
 .power-signal-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.efficiency-grid,
+.power-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.efficiency-grid div,
+.power-strip div {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.power-strip {
+  margin-top: 12px;
+}
+
+.efficiency-grid span,
+.power-strip span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.efficiency-grid strong,
+.power-strip strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sensor-list {
@@ -1902,6 +1956,7 @@ textarea {
   .node-insights,
   .power-insights,
   .power-detail-grid,
+  .power-history-grid,
   .settings-grid {
     grid-template-columns: 1fr;
   }
@@ -1961,6 +2016,8 @@ textarea {
   .gpu-pool,
   .gpu-pool-meta,
   .power-signal-grid,
+  .efficiency-grid,
+  .power-strip,
   .target-row,
   .config-row {
     grid-template-columns: 1fr;

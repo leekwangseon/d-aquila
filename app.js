@@ -8,6 +8,7 @@ let latestSummary = null;
 let latestSystem = null;
 let latestDiscovery = null;
 let loadHistory = [];
+let powerHistory = [];
 let refreshTimer = null;
 
 const loginScreen = document.querySelector("#loginScreen");
@@ -525,10 +526,11 @@ function drawSparkline(canvas, values, color) {
   ctx.stroke();
 }
 
-function drawThermalChart(values = []) {
-  const canvas = document.querySelector("#thermalChart");
+function drawLineChart(canvas, values = [], color, label, maxValue = 100) {
+  if (!canvas) return;
   const ctx = canvas.getContext("2d");
-  const series = values.length ? values : [0, 0, 0, 0, 0, 0, 0, 0];
+  const series = values.length ? values : [0];
+  const scaleMax = Math.max(maxValue, ...series, 1);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#f8fafc";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -541,17 +543,30 @@ function drawThermalChart(values = []) {
     ctx.lineTo(canvas.width, y);
     ctx.stroke();
   }
-
   ctx.beginPath();
   series.forEach((value, index) => {
-    const x = 16 + (index / (series.length - 1)) * (canvas.width - 32);
-    const y = canvas.height - 18 - (value / 100) * (canvas.height - 36);
+    const x = 16 + (index / Math.max(series.length - 1, 1)) * (canvas.width - 32);
+    const y = canvas.height - 18 - (value / scaleMax) * (canvas.height - 36);
     if (index === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
-  ctx.strokeStyle = "#d95f43";
+  ctx.strokeStyle = color;
   ctx.lineWidth = 3;
   ctx.stroke();
+  ctx.fillStyle = "#657282";
+  ctx.font = "12px Arial";
+  ctx.fillText(label, 14, 20);
+}
+
+function drawThermalChart(values = []) {
+  const canvas = document.querySelector("#thermalChart");
+  drawLineChart(canvas, values, "#d95f43", "max temperature °C", 100);
+}
+
+function drawPowerChart(values = []) {
+  const canvas = document.querySelector("#powerChart");
+  const maxValue = Math.max(500, ...values, 0);
+  drawLineChart(canvas, values, "#6957c8", "GPU power W", maxValue);
 }
 
 function drawLoadChart(system) {
@@ -771,24 +786,48 @@ function thermalLevel(value) {
 function renderPowerInsights(summary, system) {
   const gpuTemp = Number(summary?.max_gpu_temp_celsius || 0);
   const gpuPower = Number(summary?.gpu_power_watts || 0);
+  const gpuUtil = Number(summary?.gpu_usage_percent || 0);
   const serverTemp = Number(system?.temperature?.max_celsius || 0);
   const maxTemp = Math.max(gpuTemp, serverTemp);
   const thermal = thermalLevel(maxTemp);
   const dcgm = targetStats("dcgm");
   const ipmi = targetStats("ipmi");
   const sensorCount = system?.temperature?.readings?.length || 0;
+  const headroom = maxTemp > 0 ? Math.max(0, 85 - maxTemp) : Number.NaN;
+  const telemetrySignals = [dcgm.total > 0, ipmi.total > 0, sensorCount > 0];
+  const confidence = Math.round((telemetrySignals.filter(Boolean).length / telemetrySignals.length) * 100);
+  const powerPerUtil = gpuPower > 0 && gpuUtil > 0 ? gpuPower / gpuUtil : Number.NaN;
+  const efficiencySignal = !Number.isFinite(powerPerUtil)
+    ? "데이터 없음"
+    : powerPerUtil > 50
+      ? "비효율 의심"
+      : powerPerUtil > 25
+        ? "관찰 필요"
+        : "양호";
+
+  powerHistory.push({ temp: maxTemp || 0, power: gpuPower || 0 });
+  powerHistory = powerHistory.slice(-40);
 
   setText("#thermalStatusMetric", thermal.label);
   setText("#thermalStatusDetail", thermal.detail);
   setText("#powerGpuTempMetric", gpuTemp > 0 ? `${Math.round(gpuTemp)}°C` : "N/A");
   setText("#powerGpuWattMetric", gpuPower > 0 ? `${Math.round(gpuPower)} W` : "N/A");
   setText("#powerServerTempMetric", serverTemp > 0 ? `${Math.round(serverTemp)}°C` : "N/A");
+  setText("#thermalHeadroomMetric", Number.isFinite(headroom) ? `${Math.round(headroom)}°C` : "N/A");
+  setText("#telemetryConfidenceMetric", `${confidence}%`);
+  setText("#telemetryConfidenceDetail", `${telemetrySignals.filter(Boolean).length}/3 sources`);
   setText("#ipmiMetric", ipmi.total ? `${ipmi.up}/${ipmi.total}` : "N/A");
   setText("#ipmiDetail", ipmi.total ? `${ipmi.down} down` : "target 없음");
   setText("#dcgmTargets", dcgm.total ? `${dcgm.up}/${dcgm.total}` : "N/A");
   setText("#dcgmSignal", dcgm.total ? `${dcgm.up}/${dcgm.total} up` : "미감지");
   setText("#ipmiSignal", ipmi.total ? `${ipmi.up}/${ipmi.total} up` : "미감지");
   setText("#sensorSignal", sensorCount ? `${sensorCount} sensors` : "미감지");
+  setText("#gpuEfficiencyUtil", gpuUtil > 0 ? `${Math.round(gpuUtil)}%` : "N/A");
+  setText("#gpuPowerPerUtil", Number.isFinite(powerPerUtil) ? `${powerPerUtil.toFixed(1)} W/%` : "N/A");
+  setText("#gpuEfficiencySignal", efficiencySignal);
+  setText("#powerCurrentStrip", gpuPower > 0 ? `${Math.round(gpuPower)} W` : "N/A");
+  setText("#powerPeakStrip", Math.max(...powerHistory.map((sample) => sample.power)) > 0 ? `${Math.round(Math.max(...powerHistory.map((sample) => sample.power)))} W` : "N/A");
+  setText("#powerSamplesStrip", String(powerHistory.length));
 
   const badge = document.querySelector("#thermalBadge");
   if (badge) {
@@ -827,6 +866,9 @@ function renderPowerInsights(summary, system) {
   if (ipmi.down) events.push({ level: "warn", title: "IPMI target down", detail: `${ipmi.down}개 target 확인 필요` });
   if (!sensorCount) events.push({ level: "info", title: "로컬 온도 센서 없음", detail: "컨테이너 권한 또는 하드웨어 센서 노출을 확인하세요." });
   if (thermal.className === "warn" || thermal.className === "bad") events.push({ level: thermal.className, title: `열 상태 ${thermal.label}`, detail: `${Math.round(maxTemp)}°C 감지` });
+  if (Number.isFinite(headroom) && headroom <= 10) events.push({ level: "warn", title: "냉각 여유 부족", detail: `위험 기준까지 ${Math.round(headroom)}°C 남았습니다.` });
+  if (confidence < 67) events.push({ level: "warn", title: "계측 신뢰도 낮음", detail: `사용 가능한 데이터 소스 ${telemetrySignals.filter(Boolean).length}/3` });
+  if (efficiencySignal === "비효율 의심") events.push({ level: "warn", title: "전력 효율 확인", detail: `${powerPerUtil.toFixed(1)} W/% 수준입니다.` });
   if (!events.length) events.push({ level: "ok", title: "전력/온도 이벤트 없음", detail: "수집된 전력/온도 신호가 안정적입니다." });
 
   const eventList = document.querySelector("#powerEventList");
@@ -841,6 +883,9 @@ function renderPowerInsights(summary, system) {
       </div>
     `).join("");
   }
+
+  drawThermalChart(powerHistory.map((sample) => sample.temp));
+  drawPowerChart(powerHistory.map((sample) => sample.power));
 }
 
 function okText(ok) {
@@ -1012,7 +1057,6 @@ function updateMetrics(summary, system) {
   setWidth("#gpuBar", gpu);
   if (document.querySelector("#cpuSpark")) drawSparkline(document.querySelector("#cpuSpark"), [0, 0, 0, cpu, cpu, cpu, cpu], "#0b6f7a");
   if (document.querySelector("#gpuSpark")) drawSparkline(document.querySelector("#gpuSpark"), [0, 0, 0, gpu, gpu, gpu, gpu], "#4b62b5");
-  drawThermalChart(temp > 0 ? [45, 52, 57, 63, 61, 67, temp, temp] : serverTemp > 0 ? [serverTemp, serverTemp, serverTemp, serverTemp] : []);
   drawLoadChart(system);
   renderFilesystems(system?.filesystems || []);
   renderOverviewInsights(summary, system);
