@@ -1034,6 +1034,7 @@ h2 {
   border-radius: 8px;
   background: var(--panel);
   box-shadow: var(--shadow);
+  overflow: auto;
 }
 
 .hardware-selected {
@@ -1104,6 +1105,89 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.rack-placement,
+.pdu-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.rack-placement.disabled {
+  opacity: 0.58;
+}
+
+.rack-placement button:disabled,
+.rack-placement input:disabled {
+  cursor: not-allowed;
+}
+
+.mini-panel-header {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mini-panel-header strong,
+.mini-panel-header span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-panel-header span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rack-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.rack-form-grid label {
+  font-size: 12px;
+}
+
+.rack-form-grid input {
+  min-height: 38px;
+}
+
+.rack-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.rack-actions .ghost-action,
+.rack-actions .primary-action,
+.pdu-panel .ghost-action {
+  min-height: 38px;
+  justify-content: center;
+  padding: 0 10px;
+}
+
+.pdu-meter {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dfe7ef;
+}
+
+.pdu-meter i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--ok), var(--amber), var(--accent-2));
 }
 
 .hardware-legend span {
