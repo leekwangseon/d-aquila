@@ -9,9 +9,9 @@ const state = {
   devices: [],
   selected: null,
   raf: null,
-  zoom: 10,
-  rotationY: -0.42,
-  rotationX: -0.08,
+  zoom: 10.2,
+  rotationY: -0.5,
+  rotationX: -0.05,
   dragging: false,
   pointer: new THREE.Vector2(),
   raycaster: new THREE.Raycaster(),
@@ -91,7 +91,7 @@ function initScene() {
   state.scene.background = new THREE.Color(0xeef2f6);
 
   state.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
-  state.camera.position.set(0, 1.2, state.zoom);
+  state.camera.position.set(0.2, 1.15, state.zoom);
   state.camera.lookAt(0, 0, 0);
 
   state.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -187,20 +187,20 @@ function buildRack(nodes) {
   const sideMat = createMaterial(COLORS.rackSide, 0.48, 0.24);
   const trimMat = createMaterial(COLORS.trim, 0.28, 0.48);
   const railMat = createMaterial(COLORS.rail, 0.45, 0.28);
-  const depth = 1.95;
-  const height = 5.7;
-  const width = 2.75;
+  const depth = 2.9;
+  const height = 6.15;
+  const width = 2.05;
   const frontZ = depth / 2;
 
   addBox(state.rackGroup, [width + 0.28, 0.18, depth + 0.22], [0, height / 2, 0], trimMat);
   addBox(state.rackGroup, [width + 0.28, 0.2, depth + 0.22], [0, -height / 2, 0], trimMat);
-  addBox(state.rackGroup, [0.16, height, 0.16], [-width / 2, 0, frontZ], rackMat);
-  addBox(state.rackGroup, [0.16, height, 0.16], [width / 2, 0, frontZ], rackMat);
+  addBox(state.rackGroup, [0.14, height, 0.14], [-width / 2, 0, frontZ], rackMat);
+  addBox(state.rackGroup, [0.14, height, 0.14], [width / 2, 0, frontZ], rackMat);
   addBox(state.rackGroup, [0.18, height, depth], [-width / 2, 0, 0], sideMat);
   addBox(state.rackGroup, [0.18, height, depth], [width / 2, 0, 0], sideMat);
   addBox(state.rackGroup, [width, height, 0.16], [0, 0, -depth / 2], sideMat);
-  addBox(state.rackGroup, [0.055, height - 0.46, 0.08], [-width / 2 + 0.24, 0, frontZ + 0.05], railMat);
-  addBox(state.rackGroup, [0.055, height - 0.46, 0.08], [width / 2 - 0.24, 0, frontZ + 0.05], railMat);
+  addBox(state.rackGroup, [0.045, height - 0.46, 0.08], [-width / 2 + 0.18, 0, frontZ + 0.05], railMat);
+  addBox(state.rackGroup, [0.045, height - 0.46, 0.08], [width / 2 - 0.18, 0, frontZ + 0.05], railMat);
   addSideVents(state.rackGroup, width, depth, height);
   addWheels(state.rackGroup, width, depth, height);
 
@@ -221,7 +221,7 @@ function buildRack(nodes) {
     });
   }
   const slots = Math.max(displayNodes.length, 1);
-  const unit = Math.min(0.42, (height - 0.82) / Math.max(slots, 10));
+  const unit = Math.min(0.44, (height - 0.82) / Math.max(slots, 10));
   const startY = -height / 2 + 0.55;
 
   displayNodes.forEach((node, index) => {
@@ -249,10 +249,10 @@ function addWheels(parent, width, depth, height) {
   const wheelMat = createMaterial(COLORS.wheel, 0.38, 0.35);
   const y = -height / 2 - 0.19;
   const positions = [
-    [-width / 2 + 0.22, y, depth / 2 - 0.22],
-    [width / 2 - 0.22, y, depth / 2 - 0.22],
-    [-width / 2 + 0.22, y, -depth / 2 + 0.22],
-    [width / 2 - 0.22, y, -depth / 2 + 0.22]
+    [-width / 2 + 0.18, y, depth / 2 - 0.24],
+    [width / 2 - 0.18, y, depth / 2 - 0.24],
+    [-width / 2 + 0.18, y, -depth / 2 + 0.24],
+    [width / 2 - 0.18, y, -depth / 2 + 0.24]
   ];
   positions.forEach((position) => {
     addCylinder(parent, 0.11, 0.08, position, wheelMat, [Math.PI / 2, 0, 0], "caster");
@@ -268,24 +268,24 @@ function createServer(group, node, type, y, serverHeight, rackWidth, frontZ, isG
   const ventMat = createMaterial(COLORS.vent, 0.66, 0.08);
   const ledMat = createMaterial(statusColor, 0.28, 0.1);
   const accentMat = createMaterial(isGpu ? COLORS.gpu : COLORS.accent, 0.36, 0.16);
-  const body = addBox(group, [rackWidth - 0.54, serverHeight, 1.55], [0, y, 0.1], chassisMat, node.name || "server");
+  const body = addBox(group, [rackWidth - 0.38, serverHeight, 2.65], [0, y, -0.12], chassisMat, node.name || "server");
   body.userData.node = node;
   body.userData.type = type;
 
-  const face = addBox(group, [rackWidth - 0.66, serverHeight * 0.86, 0.055], [0, y, frontZ + 0.09], faceMat, "front-panel");
+  const face = addBox(group, [rackWidth - 0.48, serverHeight * 0.86, 0.055], [0, y, frontZ + 0.09], faceMat, "front-panel");
   face.userData.node = node;
   face.userData.type = type;
 
-  addBox(group, [0.12, serverHeight * 0.72, 0.075], [-(rackWidth / 2) + 0.44, y, frontZ + 0.13], accentMat, "accent-strip");
-  addBox(group, [0.5, serverHeight * 0.55, 0.075], [-(rackWidth / 2) + 0.78, y, frontZ + 0.14], ventMat, "left-vent");
-  addBox(group, [0.52, serverHeight * 0.55, 0.075], [(rackWidth / 2) - 0.78, y, frontZ + 0.14], ventMat, "right-vent");
-  addBox(group, [0.3, serverHeight * 0.38, 0.08], [0, y, frontZ + 0.145], darkMat, "handle");
-  addBox(group, [0.08, 0.08, 0.09], [0.34, y + serverHeight * 0.16, frontZ + 0.15], ledMat, "led");
-  addBox(group, [0.08, 0.08, 0.09], [0.48, y + serverHeight * 0.16, frontZ + 0.15], createMaterial(0x34d399, 0.25, 0.05), "led-ok");
+  addBox(group, [0.09, serverHeight * 0.72, 0.075], [-(rackWidth / 2) + 0.28, y, frontZ + 0.13], accentMat, "accent-strip");
+  addBox(group, [0.34, serverHeight * 0.55, 0.075], [-(rackWidth / 2) + 0.52, y, frontZ + 0.14], ventMat, "left-vent");
+  addBox(group, [0.34, serverHeight * 0.55, 0.075], [(rackWidth / 2) - 0.5, y, frontZ + 0.14], ventMat, "right-vent");
+  addBox(group, [0.24, serverHeight * 0.38, 0.08], [0, y, frontZ + 0.145], darkMat, "handle");
+  addBox(group, [0.06, 0.06, 0.09], [0.24, y + serverHeight * 0.16, frontZ + 0.15], ledMat, "led");
+  addBox(group, [0.06, 0.06, 0.09], [0.34, y + serverHeight * 0.16, frontZ + 0.15], createMaterial(0x34d399, 0.25, 0.05), "led-ok");
 
   for (let i = 0; i < 5; i += 1) {
-    addBox(group, [0.018, serverHeight * 0.45, 0.082], [-(rackWidth / 2) + 0.62 + i * 0.075, y, frontZ + 0.17], darkMat, "vent-line");
-    addBox(group, [0.018, serverHeight * 0.45, 0.082], [(rackWidth / 2) - 0.94 + i * 0.075, y, frontZ + 0.17], darkMat, "vent-line");
+    addBox(group, [0.014, serverHeight * 0.45, 0.082], [-(rackWidth / 2) + 0.42 + i * 0.052, y, frontZ + 0.17], darkMat, "vent-line");
+    addBox(group, [0.014, serverHeight * 0.45, 0.082], [(rackWidth / 2) - 0.64 + i * 0.052, y, frontZ + 0.17], darkMat, "vent-line");
   }
 
   if (!isEmpty) {
