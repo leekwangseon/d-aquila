@@ -639,6 +639,10 @@ h2 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.profile-grid .profile-os {
+  grid-column: 1 / -1;
+}
+
 .signal-grid div,
 .profile-grid div {
   min-width: 0;

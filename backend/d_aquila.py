@@ -241,6 +241,32 @@ def local_ip() -> str | None:
         return None
 
 
+def read_os_release() -> dict[str, str]:
+    for path in [Path("/host/etc/os-release"), Path("/etc/os-release")]:
+        if not path.exists():
+            continue
+        values: dict[str, str] = {}
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                values[key] = value.strip().strip('"')
+        except OSError:
+            continue
+        if values:
+            return {
+                "name": values.get("NAME", ""),
+                "pretty_name": values.get("PRETTY_NAME", ""),
+                "version": values.get("VERSION", ""),
+                "version_id": values.get("VERSION_ID", ""),
+                "version_codename": values.get("VERSION_CODENAME", "") or values.get("UBUNTU_CODENAME", ""),
+                "id": values.get("ID", ""),
+                "id_like": values.get("ID_LIKE", ""),
+            }
+    return {}
+
+
 def read_temperature() -> dict[str, Any]:
     try:
         sensors = psutil.sensors_temperatures(fahrenheit=False)
@@ -375,14 +401,16 @@ def system_metrics() -> dict[str, Any]:
     now = datetime.now().astimezone()
     disk_read_delta = (disk_io_b.read_bytes - disk_io_a.read_bytes) if disk_io_a and disk_io_b else 0
     disk_write_delta = (disk_io_b.write_bytes - disk_io_a.write_bytes) if disk_io_a and disk_io_b else 0
+    os_release = read_os_release()
 
     return {
         "hostname": socket.gethostname(),
         "ip_address": local_ip(),
         "os": {
             "system": platform.system(),
-            "release": platform.release(),
+            "kernel_release": platform.release(),
             "machine": platform.machine(),
+            **os_release,
         },
         "time": now.isoformat(timespec="seconds"),
         "timezone": str(now.tzinfo),

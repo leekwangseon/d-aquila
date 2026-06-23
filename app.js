@@ -627,6 +627,15 @@ function formatDateShort(value) {
   return date.toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+function formatOs(osInfo) {
+  if (!osInfo) return "-";
+  const distro = osInfo.pretty_name || [osInfo.name, osInfo.version_id || osInfo.version].filter(Boolean).join(" ");
+  const codename = osInfo.version_codename ? ` (${osInfo.version_codename})` : "";
+  const kernel = osInfo.kernel_release ? `kernel ${osInfo.kernel_release}` : "";
+  if (distro && kernel) return `${distro}${codename} · ${kernel}`;
+  return distro || [osInfo.system, osInfo.kernel_release].filter(Boolean).join(" ") || "-";
+}
+
 function renderFilesystems(filesystems = []) {
   if (!filesystemList) return;
   if (!filesystems.length) {
@@ -717,7 +726,7 @@ function renderOverviewInsights(summary, system) {
   setText("#modePill", clusterMode);
   setText("#profileHost", system?.hostname || "-");
   setText("#profileIp", system?.ip_address || "-");
-  setText("#profileOs", system?.os ? `${system.os.system} ${system.os.release}` : "-");
+  setText("#profileOs", formatOs(system?.os));
   setText("#profileGpu", Number(summary?.gpu_total || 0) > 0 ? `${Math.round(summary.gpu_total)} detected` : "감지 안 됨");
 
   const events = [];
