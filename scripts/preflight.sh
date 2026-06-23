@@ -28,4 +28,4 @@ for url in "${D_AQUILA_PROMETHEUS_URL:-http://localhost:9090}" http://localhost:
   fi
 done
 
-echo "Prometheus: not detected"
+echo "Prometheus: not running yet (bundled Prometheus will be started by install.sh)"

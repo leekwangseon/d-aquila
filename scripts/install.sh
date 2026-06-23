@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="d-aquila"
+APP_NAME="D-aquila"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_DIR="${D_AQUILA_INSTALL_DIR:-/opt/d-aquila}"
 PROMETHEUS_URL="${D_AQUILA_PROMETHEUS_URL:-http://localhost:9090}"
 ENABLE_SUBMIT="${D_AQUILA_ENABLE_SUBMIT:-false}"
+EXPORTER_MODE="${D_AQUILA_EXPORTER_MODE:-plan}"
+BUNDLED_PROMETHEUS="${D_AQUILA_BUNDLED_PROMETHEUS:-auto}"
 
 log() {
   printf '[%s] %s\n' "$APP_NAME" "$*"
@@ -59,14 +61,34 @@ compose_cmd() {
 }
 
 detect_prometheus() {
+  case "$BUNDLED_PROMETHEUS" in
+    true|false|auto) ;;
+    *) die "D_AQUILA_BUNDLED_PROMETHEUS must be true, false, or auto." ;;
+  esac
+
+  if [ "$BUNDLED_PROMETHEUS" = "true" ]; then
+    log "Bundled Prometheus is forced on at $PROMETHEUS_URL"
+    return
+  fi
+
   for url in "$PROMETHEUS_URL" "http://localhost:9090" "http://127.0.0.1:9090"; do
     if curl -fsS "$url/-/ready" >/dev/null 2>&1; then
       PROMETHEUS_URL="$url"
+      if [ "$BUNDLED_PROMETHEUS" = "auto" ]; then
+        BUNDLED_PROMETHEUS="false"
+      fi
       log "Detected Prometheus at $PROMETHEUS_URL"
       return
     fi
   done
-  log "Prometheus was not auto-detected. Using $PROMETHEUS_URL"
+
+  if [ "$BUNDLED_PROMETHEUS" = "false" ]; then
+    log "Bundled Prometheus is disabled. Using configured URL: $PROMETHEUS_URL"
+    return
+  fi
+
+  BUNDLED_PROMETHEUS="true"
+  log "Prometheus is not running yet. Bundled Prometheus will be started at $PROMETHEUS_URL"
 }
 
 preflight() {
@@ -122,7 +144,18 @@ write_env() {
 D_AQUILA_PROMETHEUS_URL=$PROMETHEUS_URL
 D_AQUILA_ENABLE_SUBMIT=$ENABLE_SUBMIT
 D_AQUILA_COMMAND_TIMEOUT=${D_AQUILA_COMMAND_TIMEOUT:-10}
+D_AQUILA_AUTH_MODE=${D_AQUILA_AUTH_MODE:-pam}
+D_AQUILA_AUTH_SESSION_SECONDS=${D_AQUILA_AUTH_SESSION_SECONDS:-28800}
+D_AQUILA_EXPORTER_MODE=$EXPORTER_MODE
+D_AQUILA_BUNDLED_PROMETHEUS=$BUNDLED_PROMETHEUS
 EOF
+}
+
+setup_exporters() {
+  log "Preparing exporter setup in '$EXPORTER_MODE' mode."
+  cd "$INSTALL_DIR"
+  chmod +x scripts/setup-exporters.sh || true
+  scripts/setup-exporters.sh "$EXPORTER_MODE"
 }
 
 start_app() {
@@ -130,7 +163,11 @@ start_app() {
   compose="$(compose_cmd)"
   log "Building and starting d-aquila."
   cd "$INSTALL_DIR"
-  $compose up -d --build
+  if [ "$BUNDLED_PROMETHEUS" = "true" ]; then
+    COMPOSE_PROFILES=bundled-prometheus $compose up -d --build
+  else
+    $compose up -d --build d-aquila
+  fi
 }
 
 main() {
@@ -139,9 +176,11 @@ main() {
   preflight
   install_files
   write_env
+  setup_exporters
   start_app
   log "Installation complete."
   log "Open http://<login-node>:8000"
+  log "Exporter report: $INSTALL_DIR/generated/exporters/install-report.txt"
 }
 
 main "$@"

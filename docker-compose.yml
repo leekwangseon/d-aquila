@@ -1,4 +1,20 @@
 services:
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: d-aquila-prometheus
+    restart: unless-stopped
+    network_mode: host
+    profiles:
+      - bundled-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./generated/prometheus/file_sd:/etc/prometheus/file_sd:ro
+      - d-aquila-prometheus-data:/prometheus
+
   d-aquila:
     build: .
     image: d-aquila:0.1
@@ -24,3 +40,6 @@ services:
       - /etc/slurm-llnl:/etc/slurm-llnl:ro
       - /run/munge:/run/munge:ro
       - /var/run/munge:/var/run/munge:ro
+
+volumes:
+  d-aquila-prometheus-data:

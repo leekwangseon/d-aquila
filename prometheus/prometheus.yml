@@ -1,0 +1,27 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+
+  - job_name: d-aquila-node
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/node-exporter.json
+        refresh_interval: 30s
+
+  - job_name: d-aquila-dcgm
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/dcgm-exporter.json
+        refresh_interval: 30s
+
+  - job_name: d-aquila-ipmi
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/ipmi-exporter.json
+        refresh_interval: 30s
