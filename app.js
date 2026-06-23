@@ -510,9 +510,24 @@ function setText(selector, value) {
   if (element) element.textContent = value;
 }
 
-function drawSparkline(canvas, values, color) {
+function prepareCanvas(canvas) {
+  const ratio = Math.max(window.devicePixelRatio || 1, 1);
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(Math.round(rect.width || canvas.clientWidth || canvas.width), 1);
+  const height = Math.max(Math.round(rect.height || canvas.clientHeight || canvas.height), 1);
+  const targetWidth = Math.round(width * ratio);
+  const targetHeight = Math.round(height * ratio);
+  if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+  }
   const ctx = canvas.getContext("2d");
-  const { width, height } = canvas;
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  return { ctx, width, height };
+}
+
+function drawSparkline(canvas, values, color) {
+  const { ctx, width, height } = prepareCanvas(canvas);
   ctx.clearRect(0, 0, width, height);
   ctx.lineWidth = 3;
   ctx.strokeStyle = color;
@@ -528,25 +543,25 @@ function drawSparkline(canvas, values, color) {
 
 function drawLineChart(canvas, values = [], color, label, maxValue = 100) {
   if (!canvas) return;
-  const ctx = canvas.getContext("2d");
+  const { ctx, width, height } = prepareCanvas(canvas);
   const series = values.length ? values : [0];
   const scaleMax = Math.max(maxValue, ...series, 1);
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#f8fafc";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, width, height);
   ctx.strokeStyle = "#d7dde6";
   ctx.lineWidth = 1;
   for (let i = 1; i < 4; i += 1) {
-    const y = (canvas.height / 4) * i;
+    const y = (height / 4) * i;
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(canvas.width, y);
+    ctx.lineTo(width, y);
     ctx.stroke();
   }
   ctx.beginPath();
   series.forEach((value, index) => {
-    const x = 16 + (index / Math.max(series.length - 1, 1)) * (canvas.width - 32);
-    const y = canvas.height - 18 - (value / scaleMax) * (canvas.height - 36);
+    const x = 16 + (index / Math.max(series.length - 1, 1)) * (width - 32);
+    const y = height - 18 - (value / scaleMax) * (height - 36);
     if (index === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
@@ -572,42 +587,56 @@ function drawPowerChart(values = []) {
 function drawLoadChart(system) {
   const canvas = document.querySelector("#loadChart");
   if (!canvas) return;
-  const ctx = canvas.getContext("2d");
+  const { ctx, width, height } = prepareCanvas(canvas);
   const cores = Math.max(Number(system?.cpu?.logical_count || 1), 1);
   const load1 = Number(system?.cpu?.load1 || 0);
+  const pressure = Math.min((load1 / cores) * 100, 100);
   if (Number.isFinite(load1)) {
-    loadHistory.push({ load: load1, ratio: Math.min((load1 / cores) * 100, 100) });
+    loadHistory.push({ load: load1, ratio: pressure });
     loadHistory = loadHistory.slice(-30);
   }
   const series = loadHistory.length ? loadHistory : [{ load: 0, ratio: 0 }];
 
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  setText("#loadChartCurrent", Number.isFinite(load1) ? load1.toFixed(2) : "-");
+  setText("#loadChartCores", String(cores));
+  setText("#loadChartPressure", Number.isFinite(pressure) ? `${Math.round(pressure)}%` : "-");
+
+  ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#f8fafc";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, width, height);
   ctx.strokeStyle = "#d7dde6";
   ctx.lineWidth = 1;
   for (let i = 1; i < 4; i += 1) {
-    const y = (canvas.height / 4) * i;
+    const y = (height / 4) * i;
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(canvas.width, y);
+    ctx.lineTo(width, y);
     ctx.stroke();
   }
 
   ctx.beginPath();
   series.forEach((point, index) => {
-    const x = 12 + (index / Math.max(series.length - 1, 1)) * (canvas.width - 24);
-    const y = canvas.height - 16 - (point.ratio / 100) * (canvas.height - 32);
+    const x = 16 + (index / Math.max(series.length - 1, 1)) * (width - 32);
+    const y = height - 18 - (point.ratio / 100) * (height - 42);
     if (index === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
   ctx.strokeStyle = "#0b6f7a";
   ctx.lineWidth = 3;
   ctx.stroke();
-  ctx.fillStyle = "#657282";
-  ctx.font = "12px Arial";
+
   const latest = series[series.length - 1];
-  ctx.fillText(`load1 ${latest.load.toFixed(2)} / cores ${cores}`, 14, 20);
+  const dotX = series.length === 1 ? 16 : width - 16;
+  const dotY = height - 18 - (latest.ratio / 100) * (height - 42);
+  ctx.fillStyle = "#0b6f7a";
+  ctx.beginPath();
+  ctx.arc(dotX, dotY, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#657282";
+  ctx.font = "600 12px Arial, sans-serif";
+  ctx.textBaseline = "top";
+  ctx.fillText("Load / core pressure", 16, 14);
 }
 
 function formatPercent(value) {
@@ -1012,6 +1041,10 @@ function updateMetrics(summary, system) {
   const netRate = Number(system?.network?.rx_bytes_per_sec ?? 0) + Number(system?.network?.tx_bytes_per_sec ?? 0);
   const logicalCores = Number(system?.cpu?.logical_count || 0);
   const physicalCores = Number(system?.cpu?.physical_count || 0);
+  const load1 = Number(system?.cpu?.load1 || 0);
+  const load5 = Number(system?.cpu?.load5 || 0);
+  const load15 = Number(system?.cpu?.load15 || 0);
+  const loadPressure = logicalCores ? (load1 / logicalCores) * 100 : Number.NaN;
 
   setText("#cpuMetric", formatPercent(cpu));
   setText("#gpuMetric", gpu > 0 ? formatPercent(gpu) : "N/A");
@@ -1047,6 +1080,17 @@ function updateMetrics(summary, system) {
   setText("#diskWriteRate", system?.disk_io ? formatRate(system.disk_io.write_bytes_per_sec) : "-");
   setText("#diskReadTotal", system?.disk_io ? `${formatBytes(system.disk_io.read_bytes)} total` : "total");
   setText("#diskWriteTotal", system?.disk_io ? `${formatBytes(system.disk_io.write_bytes)} total` : "total");
+  setText("#diskReadOps", system?.disk_io ? Number(system.disk_io.read_count || 0).toLocaleString("ko-KR") : "-");
+  setText("#diskWriteOps", system?.disk_io ? Number(system.disk_io.write_count || 0).toLocaleString("ko-KR") : "-");
+  setText("#loadPressureMetric", Number.isFinite(loadPressure) ? `${Math.round(loadPressure)}%` : "-");
+  setText("#loadTrendMetric", system?.cpu ? `${load1.toFixed(2)} / ${load5.toFixed(2)} / ${load15.toFixed(2)}` : "-");
+  setText("#cpuBusyMetric", formatPercent(cpu));
+  setText("#memAvailableMetric", system?.memory ? formatBytes(system.memory.available_bytes) : "-");
+  setText("#memUsedMetric", system?.memory ? formatBytes(system.memory.used_bytes) : "-");
+  setText("#memTotalMetric", system?.memory ? formatBytes(system.memory.total_bytes) : "-");
+  setText("#rxTotalMetric", system?.network ? formatBytes(system.network.bytes_recv) : "-");
+  setText("#txTotalMetric", system?.network ? formatBytes(system.network.bytes_sent) : "-");
+  setText("#netNowMetric", netRate > 0 ? formatRate(netRate) : "0 B/s");
   setText("#cpuBarText", formatPercent(cpu));
   setText("#memBarText", Number.isFinite(system?.memory?.usage_percent) ? `${Math.round(system.memory.usage_percent)}%` : "N/A");
   setText("#diskBarText", Number.isFinite(system?.disk?.usage_percent) ? `${Math.round(system.disk.usage_percent)}%` : "N/A");

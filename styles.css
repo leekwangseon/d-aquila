@@ -357,6 +357,14 @@ h2 {
   min-width: 0;
 }
 
+.resource-signal-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 18px;
+  min-width: 0;
+}
+
 .load-panel {
   grid-column: 1 / -1;
 }
@@ -1272,6 +1280,30 @@ h2 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.resource-signal-panel.cpu-signal {
+  background: linear-gradient(135deg, #ffffff 0%, #eefafa 100%);
+}
+
+.resource-signal-panel.cpu-signal::before {
+  background: var(--accent);
+}
+
+.resource-signal-panel.memory-signal {
+  background: linear-gradient(135deg, #ffffff 0%, #eefaf7 100%);
+}
+
+.resource-signal-panel.memory-signal::before {
+  background: var(--ok);
+}
+
+.resource-signal-panel.network-signal {
+  background: linear-gradient(135deg, #ffffff 0%, #eef4ff 100%);
+}
+
+.resource-signal-panel.network-signal::before {
+  background: var(--blue);
+}
+
 .efficiency-grid,
 .power-strip {
   display: grid;
@@ -1840,6 +1872,34 @@ th {
   gap: 12px;
 }
 
+.load-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.load-summary-grid div {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.load-summary-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.load-summary-grid strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .io-grid div,
 .empty-inline {
   min-width: 0;
@@ -1951,6 +2011,7 @@ textarea {
   .dashboard-grid,
   .detail-grid,
   .resource-detail-grid,
+  .resource-signal-grid,
   .overview-insights,
   .job-insights,
   .node-insights,
@@ -2016,6 +2077,7 @@ textarea {
   .gpu-pool,
   .gpu-pool-meta,
   .power-signal-grid,
+  .load-summary-grid,
   .efficiency-grid,
   .power-strip,
   .target-row,
