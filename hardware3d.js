@@ -94,6 +94,12 @@ function addCylinder(parent, radius, depth, position, material, rotation = [0, 0
   return mesh;
 }
 
+function addRotatedBar(parent, size, position, material, rotationZ, name = "") {
+  const mesh = addBox(parent, size, position, material, name);
+  mesh.rotation.z = rotationZ;
+  return mesh;
+}
+
 function initScene() {
   state.stage = document.querySelector("#hardwareStage");
   if (!state.stage || state.renderer) return;
@@ -429,31 +435,117 @@ function addWheels(parent, width, depth, height) {
 
 function createServer(group, node, type, y, serverHeight, rackWidth, frontZ, isGpu, layout) {
   const statusColor = COLORS[type] || COLORS.idle;
-  const chassisMat = createMaterial(0x242b31, 0.5, 0.32);
-  const faceMat = createMaterial(COLORS.face, 0.56, 0.15);
-  const darkMat = createMaterial(0x10151a, 0.58, 0.25);
-  const ventMat = createMaterial(COLORS.vent, 0.66, 0.08);
-  const ledMat = createMaterial(statusColor, 0.28, 0.1);
-  const accentMat = createMaterial(isGpu ? COLORS.gpu : COLORS.accent, 0.36, 0.16);
-  const body = addBox(group, [rackWidth - 0.38, serverHeight, 2.65], [0, y, -0.12], chassisMat, node.name || "server");
+  const chassisMat = createMaterial(0xcfd7dd, 0.38, 0.28);
+  const faceMat = createMaterial(0xe8ecef, 0.34, 0.22);
+  const darkMat = createMaterial(0x0b0f13, 0.62, 0.16);
+  const bayMat = createMaterial(0x151b21, 0.7, 0.08);
+  const grilleMat = createMaterial(0xf2f4f5, 0.28, 0.18);
+  const ledMat = createMaterial(statusColor, 0.22, 0.06);
+  const accentMat = createMaterial(isGpu ? COLORS.gpu : COLORS.accent, 0.32, 0.14);
+  const body = addBox(group, [rackWidth - 0.34, serverHeight, 2.66], [0, y, -0.12], chassisMat, node.name || "server");
   body.userData = { node, type, layout };
 
-  const face = addBox(group, [rackWidth - 0.48, serverHeight * 0.86, 0.055], [0, y, frontZ + 0.09], faceMat, "front-panel");
+  const faceHeight = Math.max(serverHeight * 0.9, 0.08);
+  const face = addBox(group, [rackWidth - 0.36, faceHeight, 0.075], [0, y, frontZ + 0.105], faceMat, "front-panel");
   face.userData = { node, type, layout };
 
-  addBox(group, [0.09, serverHeight * 0.72, 0.075], [-(rackWidth / 2) + 0.28, y, frontZ + 0.13], accentMat, "accent-strip");
-  addBox(group, [0.34, serverHeight * 0.55, 0.075], [-(rackWidth / 2) + 0.52, y, frontZ + 0.14], ventMat, "left-vent");
-  addBox(group, [0.34, serverHeight * 0.55, 0.075], [(rackWidth / 2) - 0.5, y, frontZ + 0.14], ventMat, "right-vent");
-  addBox(group, [0.24, Math.min(serverHeight * 0.38, 0.18), 0.08], [0, y, frontZ + 0.145], darkMat, "handle");
-  addBox(group, [0.06, 0.06, 0.09], [0.24, y + Math.min(serverHeight * 0.16, 0.12), frontZ + 0.15], ledMat, "led");
-  addBox(group, [0.06, 0.06, 0.09], [0.34, y + Math.min(serverHeight * 0.16, 0.12), frontZ + 0.15], createMaterial(0x34d399, 0.25, 0.05), "led-ok");
-
-  for (let i = 0; i < 5; i += 1) {
-    addBox(group, [0.014, serverHeight * 0.45, 0.082], [-(rackWidth / 2) + 0.42 + i * 0.052, y, frontZ + 0.17], darkMat, "vent-line");
-    addBox(group, [0.014, serverHeight * 0.45, 0.082], [(rackWidth / 2) - 0.64 + i * 0.052, y, frontZ + 0.17], darkMat, "vent-line");
-  }
+  addServerFaceDetails(group, {
+    y,
+    serverHeight,
+    faceHeight,
+    rackWidth,
+    frontZ,
+    isGpu,
+    darkMat,
+    bayMat,
+    grilleMat,
+    ledMat,
+    accentMat
+  });
 
   state.devices.push(body, face);
+}
+
+function addServerFaceDetails(group, parts) {
+  const {
+    y,
+    serverHeight,
+    faceHeight,
+    rackWidth,
+    frontZ,
+    isGpu,
+    darkMat,
+    bayMat,
+    grilleMat,
+    ledMat,
+    accentMat
+  } = parts;
+  const z = frontZ + 0.155;
+  const safeHeight = Math.max(faceHeight, 0.08);
+  const bayHeight = Math.max(safeHeight * 0.62, 0.055);
+  const bayWidth = 0.16;
+  const bayGap = 0.04;
+  const bayCount = safeHeight > 0.42 ? 8 : 6;
+  const bayStart = -((bayCount - 1) * (bayWidth + bayGap)) / 2;
+
+  addBox(group, [0.16, safeHeight * 0.88, 0.09], [-(rackWidth / 2) + 0.2, y, z], createMaterial(0xd5dbdf, 0.36, 0.22), "left-ear");
+  addBox(group, [0.16, safeHeight * 0.88, 0.09], [(rackWidth / 2) - 0.2, y, z], createMaterial(0xd5dbdf, 0.36, 0.22), "right-ear");
+  addBox(group, [0.045, safeHeight * 0.68, 0.11], [-(rackWidth / 2) + 0.28, y, z + 0.018], accentMat, "status-strip");
+  addBox(group, [0.045, safeHeight * 0.68, 0.11], [(rackWidth / 2) - 0.28, y, z + 0.018], createMaterial(0x90a4b5, 0.38, 0.12), "service-strip");
+
+  for (let i = 0; i < bayCount; i += 1) {
+    const x = bayStart + i * (bayWidth + bayGap);
+    addBox(group, [bayWidth, bayHeight, 0.105], [x, y, z + 0.006], bayMat, "drive-bay");
+    addDriveBayLines(group, x, y, z + 0.068, bayWidth, bayHeight, darkMat);
+    addBox(group, [0.018, 0.018, 0.118], [x + bayWidth * 0.25, y + bayHeight * 0.32, z + 0.078], ledMat, "bay-led");
+    addBox(group, [0.016, 0.016, 0.118], [x - bayWidth * 0.25, y + bayHeight * 0.32, z + 0.078], createMaterial(0x34d399, 0.22, 0.04), "bay-ok-led");
+  }
+
+  addHoneycombGuard(group, {
+    centerY: y,
+    height: safeHeight,
+    width: rackWidth - 0.66,
+    z: z + 0.12,
+    material: grilleMat
+  });
+
+  const badgeMat = createMaterial(0xc7ccd1, 0.32, 0.24);
+  addCylinder(group, Math.min(0.075, safeHeight * 0.2), 0.018, [0, y, z + 0.145], badgeMat, [Math.PI / 2, 0, 0], "server-badge");
+  addBox(group, [0.11, Math.max(safeHeight * 0.09, 0.018), 0.018], [0, y, z + 0.157], createMaterial(0x7c8790, 0.35, 0.12), "server-badge-mark");
+
+  if (isGpu) {
+    addBox(group, [rackWidth - 0.7, Math.max(safeHeight * 0.06, 0.018), 0.12], [0, y - safeHeight * 0.37, z + 0.1], createMaterial(COLORS.gpu, 0.32, 0.1), "gpu-accent-line");
+  }
+}
+
+function addDriveBayLines(group, x, y, z, bayWidth, bayHeight, material) {
+  const lineCount = 4;
+  for (let i = 0; i < lineCount; i += 1) {
+    const offset = -bayWidth * 0.26 + i * bayWidth * 0.17;
+    addBox(group, [0.012, bayHeight * 0.72, 0.018], [x + offset, y - bayHeight * 0.04, z], material, "drive-slot-line");
+  }
+}
+
+function addHoneycombGuard(group, { centerY, height, width, z, material }) {
+  const cells = 5;
+  const cellWidth = width / cells;
+  const cellHeight = Math.max(height * 0.76, 0.07);
+  const barThickness = Math.max(Math.min(height * 0.055, 0.026), 0.012);
+  const diagonalLength = Math.min(cellWidth * 0.54, cellHeight * 0.78);
+  const verticalLength = Math.max(cellHeight * 0.48, 0.05);
+  const startX = -width / 2 + cellWidth / 2;
+
+  for (let i = 0; i < cells; i += 1) {
+    const x = startX + i * cellWidth;
+    const sideOffset = cellWidth * 0.26;
+    const yOffset = cellHeight * 0.21;
+    addBox(group, [barThickness, verticalLength, 0.035], [x - sideOffset, centerY, z], material, "hex-vertical");
+    addBox(group, [barThickness, verticalLength, 0.035], [x + sideOffset, centerY, z], material, "hex-vertical");
+    addRotatedBar(group, [diagonalLength, barThickness, 0.035], [x - sideOffset / 2, centerY + yOffset, z], material, -Math.PI / 5, "hex-diagonal");
+    addRotatedBar(group, [diagonalLength, barThickness, 0.035], [x + sideOffset / 2, centerY + yOffset, z], material, Math.PI / 5, "hex-diagonal");
+    addRotatedBar(group, [diagonalLength, barThickness, 0.035], [x - sideOffset / 2, centerY - yOffset, z], material, Math.PI / 5, "hex-diagonal");
+    addRotatedBar(group, [diagonalLength, barThickness, 0.035], [x + sideOffset / 2, centerY - yOffset, z], material, -Math.PI / 5, "hex-diagonal");
+  }
 }
 
 function pick(event) {
