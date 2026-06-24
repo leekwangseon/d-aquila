@@ -2965,3 +2965,473 @@ textarea {
     font-size: 24px;
   }
 }
+
+/* Enterprise operations skin */
+:root {
+  --bg: #e8edf3;
+  --ink: #101820;
+  --muted: #647386;
+  --line: #d6dde7;
+  --panel: #ffffff;
+  --panel-2: #f5f8fb;
+  --accent: #007781;
+  --accent-2: #d45b3c;
+  --amber: #d49a16;
+  --violet: #5d63c8;
+  --blue: #1f75bd;
+  --rose: #c84b72;
+  --ok: #178a5a;
+  --warn: #b86f08;
+  --bad: #bd3b35;
+  --gpu: #4b62b5;
+  --shadow: 0 14px 34px rgba(20, 32, 46, 0.08);
+  --shadow-soft: 0 1px 2px rgba(20, 32, 46, 0.08), 0 16px 38px rgba(20, 32, 46, 0.07);
+  --surface-glass: rgba(255, 255, 255, 0.76);
+  --sidebar: #101a24;
+  --sidebar-2: #162433;
+}
+
+body {
+  background:
+    linear-gradient(180deg, #f3f6f9 0, #e8edf3 44%, #e4eaf1 100%);
+  color: var(--ink);
+  font-family: Inter, Arial, "Noto Sans KR", sans-serif;
+  font-size: 14px;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(19, 32, 45, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(19, 32, 45, 0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.55), transparent 68%);
+}
+
+.app-shell {
+  grid-template-columns: 252px minmax(0, 1fr);
+}
+
+.sidebar {
+  gap: 24px;
+  padding: 22px 14px 18px;
+  background:
+    linear-gradient(180deg, var(--sidebar) 0%, #0f1a25 52%, #0c1620 100%);
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.22);
+}
+
+.brand {
+  min-height: 56px;
+  padding: 4px 6px;
+}
+
+.brand-mark {
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.22), transparent 42%),
+    linear-gradient(135deg, #007781, #d45b3c);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22);
+}
+
+.brand strong {
+  font-size: 19px;
+  letter-spacing: 0;
+}
+
+.brand small,
+.cluster-health small {
+  color: rgba(231, 237, 245, 0.64);
+}
+
+.nav-list {
+  gap: 5px;
+}
+
+.nav-item {
+  min-height: 42px;
+  gap: 11px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: rgba(232, 239, 247, 0.72);
+  font-weight: 700;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.nav-item .icon {
+  width: 26px;
+  color: #9ed7dc;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.nav-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.nav-item.active {
+  color: #ffffff;
+  background:
+    linear-gradient(90deg, rgba(0, 119, 129, 0.34), rgba(255, 255, 255, 0.08));
+  border-color: rgba(129, 211, 218, 0.26);
+  box-shadow: inset 3px 0 0 #31b8c1;
+}
+
+.cluster-health {
+  padding: 13px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 7px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.055));
+}
+
+.main {
+  position: relative;
+  padding: 22px 28px 24px;
+}
+
+.topbar {
+  align-items: center;
+  margin: -2px -2px 18px;
+  padding: 0 2px 16px;
+  border-bottom: 1px solid rgba(184, 195, 209, 0.56);
+}
+
+.eyebrow {
+  color: #006d77;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+h1 {
+  font-size: 29px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+h2 {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.topbar-actions {
+  gap: 9px;
+}
+
+.search {
+  height: 40px;
+  min-width: 310px;
+  border-color: rgba(184, 195, 209, 0.86);
+  background: var(--surface-glass);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9), 0 8px 18px rgba(20, 32, 46, 0.04);
+  backdrop-filter: blur(10px);
+}
+
+.search span {
+  color: #385165;
+  font-weight: 800;
+}
+
+.primary-action,
+.ghost-action,
+.icon-button {
+  min-height: 40px;
+  border-radius: 7px;
+  font-weight: 800;
+}
+
+.primary-action {
+  background: linear-gradient(180deg, #078792, #006f79);
+  box-shadow: 0 10px 20px rgba(0, 119, 129, 0.18);
+}
+
+.primary-action:hover {
+  background: linear-gradient(180deg, #0a929d, #006873);
+}
+
+.ghost-action,
+.icon-button {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(184, 195, 209, 0.86);
+}
+
+.view {
+  scrollbar-color: #a9b7c7 transparent;
+  scrollbar-width: thin;
+}
+
+.status-grid {
+  grid-template-columns: repeat(auto-fit, minmax(152px, 1fr));
+  gap: 14px;
+}
+
+.metric,
+.panel,
+.hardware-detail,
+.hardware-stage {
+  border-color: rgba(195, 205, 218, 0.88);
+  border-radius: 7px;
+  box-shadow: var(--shadow-soft);
+}
+
+.metric,
+.panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(250, 252, 254, 0.96));
+}
+
+.metric {
+  min-height: 112px;
+  padding: 16px;
+}
+
+.metric::before,
+.panel::before {
+  height: 3px;
+  border-radius: 7px 7px 0 0;
+}
+
+.metric-label {
+  margin-bottom: 9px;
+  color: #5f6f82;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.metric strong {
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.metric small,
+.panel p {
+  color: #66778b;
+}
+
+.sparkline {
+  opacity: 0.9;
+}
+
+.panel {
+  padding: 18px;
+}
+
+.panel-header {
+  margin-bottom: 15px;
+}
+
+.dashboard-grid,
+.resource-detail-grid,
+.resource-signal-grid,
+.overview-insights,
+.job-insights,
+.node-insights,
+.power-insights,
+.power-detail-grid,
+.power-history-grid,
+.settings-grid,
+.log-layout,
+.graph-board,
+.hardware-layout {
+  gap: 16px;
+}
+
+.bar {
+  height: 10px;
+  background: #e2e9f1;
+  box-shadow: inset 0 1px 2px rgba(25, 35, 48, 0.08);
+}
+
+.bar i {
+  background: linear-gradient(90deg, #007781, #34a6b0);
+}
+
+.gpu-bar i {
+  background: linear-gradient(90deg, #4b62b5, #7b8de0);
+}
+
+.detail-grid div,
+.hardware-metrics div,
+.rack-placement,
+.pdu-panel,
+.node-card,
+.alerts article,
+.thermal-list article,
+.fs-row,
+.io-grid div,
+.load-summary-grid div,
+.sensor-row,
+.check-row,
+.target-row,
+.config-row,
+.log-item,
+.log-source {
+  border: 1px solid rgba(215, 222, 232, 0.78);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(246, 249, 252, 0.92));
+}
+
+.health-panel,
+.pressure-panel,
+.profile-panel,
+.timeline-panel,
+.queue-panel,
+.user-panel,
+.partition-panel,
+.node-health-panel,
+.node-gpu-panel,
+.thermal-gauge-panel,
+.exporter-panel,
+.efficiency-panel,
+.resource-signal-panel.cpu-signal,
+.resource-signal-panel.memory-signal,
+.resource-signal-panel.network-signal,
+.settings-panel,
+.log-panel,
+.graph-hero-panel,
+.graph-radial-panel,
+.graph-dot-panel,
+.graph-square-panel,
+.graph-bar-panel,
+.graph-pulse-panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 251, 253, 0.98));
+}
+
+.badge,
+.health-badge,
+.mode-pill,
+.hardware-legend span,
+.node-card b,
+.log-filter,
+.segmented {
+  border: 1px solid rgba(195, 205, 218, 0.86);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.segmented {
+  background: rgba(245, 248, 251, 0.9);
+}
+
+.segmented button.active {
+  background: #007781;
+  box-shadow: 0 6px 14px rgba(0, 119, 129, 0.18);
+}
+
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+th {
+  color: #5f6f82;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+td {
+  color: #1d2a35;
+}
+
+tr:hover td {
+  background: rgba(0, 119, 129, 0.035);
+}
+
+.hardware-layout {
+  grid-template-columns: minmax(0, 1fr) 352px;
+}
+
+.hardware-stage {
+  background:
+    linear-gradient(180deg, rgba(243, 247, 251, 0.82), rgba(227, 234, 242, 0.92)),
+    #e8edf3;
+}
+
+.hardware-overlay {
+  inset: 14px 14px auto;
+  padding: 12px;
+  border: 1px solid rgba(195, 205, 218, 0.7);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.64);
+  backdrop-filter: blur(8px);
+}
+
+.hardware-detail {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(248, 251, 253, 0.98));
+}
+
+.hardware-selected {
+  border: 1px solid rgba(0, 119, 129, 0.14);
+  background:
+    linear-gradient(180deg, rgba(239, 250, 251, 0.96), rgba(255, 255, 255, 0.95));
+}
+
+.graph-line-chart,
+.load-chart,
+.thermal-chart,
+.power-chart {
+  border: 1px solid rgba(215, 222, 232, 0.78);
+  background:
+    linear-gradient(180deg, rgba(248, 251, 253, 0.9), rgba(242, 246, 250, 0.92));
+}
+
+.login-screen {
+  background:
+    linear-gradient(135deg, rgba(16, 26, 36, 0.96), rgba(0, 119, 129, 0.82)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent);
+}
+
+.login-card {
+  border-radius: 7px;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.34);
+}
+
+@media (max-width: 1180px) {
+  .right-column {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1280px) {
+  .status-grid {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 860px) {
+  body {
+    overflow: auto;
+  }
+
+  .app-shell {
+    min-height: 100vh;
+    height: auto;
+  }
+
+  .sidebar {
+    padding: 12px;
+  }
+
+  .nav-item {
+    min-width: max-content;
+  }
+
+  .main {
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .topbar {
+    margin-bottom: 16px;
+  }
+}
