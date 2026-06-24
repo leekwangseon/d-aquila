@@ -3358,11 +3358,24 @@ tr:hover td {
 
 .hardware-overlay {
   inset: 14px 14px auto;
-  padding: 12px;
-  border: 1px solid rgba(195, 205, 218, 0.7);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.hardware-overlay > div {
+  max-width: min(320px, 42%);
+  padding: 11px 12px;
+  border: 1px solid rgba(195, 205, 218, 0.72);
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.64);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 10px 24px rgba(20, 32, 46, 0.08);
   backdrop-filter: blur(8px);
+}
+
+.hardware-overlay .hardware-controls {
+  max-width: 170px;
 }
 
 .hardware-detail {
