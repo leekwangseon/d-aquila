@@ -3156,6 +3156,26 @@ h2 {
   background: linear-gradient(180deg, #0a929d, #006873);
 }
 
+.danger-action {
+  min-height: 32px;
+  padding: 0 10px;
+  color: #8f2f2a;
+  border: 1px solid rgba(189, 59, 53, 0.28);
+  border-radius: 7px;
+  background: #fff0ef;
+  font-weight: 800;
+}
+
+.danger-action:hover {
+  color: white;
+  background: #bd3b35;
+}
+
+.danger-action:disabled {
+  opacity: 0.58;
+  cursor: wait;
+}
+
 .ghost-action,
 .icon-button {
   background: rgba(255, 255, 255, 0.72);
@@ -3398,6 +3418,185 @@ tr:hover td {
     linear-gradient(180deg, rgba(248, 251, 253, 0.9), rgba(242, 246, 250, 0.92));
 }
 
+.job-toolbar,
+.wizard-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.job-toolbar select,
+.log-toolbar select {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid rgba(184, 195, 209, 0.86);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.86);
+  font-weight: 700;
+}
+
+.policy-grid,
+.wizard-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.policy-grid label,
+.wizard-grid label {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  color: #5f6f82;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.policy-grid input,
+.wizard-grid input,
+.wizard-grid textarea {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid rgba(184, 195, 209, 0.86);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.policy-grid input,
+.wizard-grid input {
+  height: 40px;
+  padding: 0 11px;
+}
+
+.wizard-grid textarea {
+  min-height: 94px;
+  resize: vertical;
+}
+
+.toggle-row {
+  min-height: 40px;
+  grid-template-columns: auto 1fr !important;
+  align-items: center;
+  padding: 0 11px;
+  border: 1px solid rgba(215, 222, 232, 0.78);
+  border-radius: 7px;
+  background: rgba(246, 249, 252, 0.92);
+}
+
+.toggle-row input {
+  width: auto;
+  height: auto;
+}
+
+.wizard-grid label:first-child,
+.wizard-result,
+.policy-grid .toggle-row:first-child {
+  grid-column: span 2;
+}
+
+.wizard-actions {
+  grid-column: span 2;
+  align-self: end;
+}
+
+.ipmi-detail-panel {
+  grid-column: 1 / -1;
+}
+
+.prometheus-wizard-panel {
+  grid-column: 1 / -1;
+}
+
+.prometheus-wizard-panel .wizard-grid {
+  grid-template-columns: minmax(260px, 0.9fr) repeat(3, minmax(180px, 1fr));
+}
+
+.prometheus-wizard-panel .wizard-grid label:first-child {
+  grid-column: auto;
+}
+
+.ipmi-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.ipmi-summary div {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid rgba(215, 222, 232, 0.78);
+  border-radius: 7px;
+  background: rgba(246, 249, 252, 0.92);
+}
+
+.ipmi-summary span,
+.sensor-list.compact span {
+  color: #66778b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ipmi-sensor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.ipmi-sensor-grid > div {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sensor-list.compact {
+  display: grid;
+  gap: 8px;
+}
+
+.audit-list {
+  display: grid;
+  gap: 8px;
+}
+
+.audit-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid rgba(215, 222, 232, 0.78);
+  border-radius: 7px;
+  background: rgba(246, 249, 252, 0.92);
+}
+
+.audit-row > span {
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.audit-row.warn > span {
+  background: var(--warn);
+}
+
+.audit-row strong,
+.audit-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-row small {
+  color: #66778b;
+}
+
 .login-screen {
   background:
     linear-gradient(135deg, rgba(16, 26, 36, 0.96), rgba(0, 119, 129, 0.82)),
@@ -3412,6 +3611,12 @@ tr:hover td {
 @media (max-width: 1180px) {
   .right-column {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .policy-grid,
+  .wizard-grid,
+  .ipmi-sensor-grid {
+    grid-template-columns: 1fr 1fr;
   }
 }
 
@@ -3446,5 +3651,19 @@ tr:hover td {
 
   .topbar {
     margin-bottom: 16px;
+  }
+
+  .policy-grid,
+  .wizard-grid,
+  .ipmi-summary,
+  .ipmi-sensor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wizard-grid label:first-child,
+  .wizard-result,
+  .policy-grid .toggle-row:first-child,
+  .wizard-actions {
+    grid-column: auto;
   }
 }

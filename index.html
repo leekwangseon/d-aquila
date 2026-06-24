@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>D-aquila | HPC Operations Platform</title>
-    <link rel="stylesheet" href="./styles.css?v=20260624-enterprise3" />
+    <link rel="stylesheet" href="./styles.css?v=20260624-ops1" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -585,7 +585,19 @@
                 <h2>Slurm 작업 현황</h2>
                 <p>squeue에서 가져온 작업 상태와 자원 요청량을 추적합니다.</p>
               </div>
-              <button class="ghost-action" id="refreshJobs" type="button">새로고침</button>
+              <div class="job-toolbar">
+                <select id="jobUserFilter" aria-label="사용자별 작업 필터">
+                  <option value="all">모든 사용자</option>
+                </select>
+                <select id="jobStateFilter" aria-label="작업 상태 필터">
+                  <option value="all">모든 상태</option>
+                  <option value="running">RUNNING</option>
+                  <option value="pending">PENDING</option>
+                  <option value="completing">COMPLETING</option>
+                  <option value="failed">FAILED</option>
+                </select>
+                <button class="ghost-action" id="refreshJobs" type="button">새로고침</button>
+              </div>
             </div>
             <div class="table-wrap">
               <table>
@@ -597,11 +609,32 @@
                     <th>상태</th>
                     <th>자원</th>
                     <th>남은 시간</th>
+                    <th>제어</th>
                   </tr>
                 </thead>
                 <tbody id="jobTable"></tbody>
               </table>
             </div>
+          </section>
+
+          <section class="panel job-policy-panel">
+            <div class="panel-header compact">
+              <div>
+                <h2>작업 제출 정책 관리</h2>
+                <p>Slurm 제출 전에 D-aquila가 허용 파티션과 최대 자원 요청량을 검증합니다.</p>
+              </div>
+              <span class="badge soft" id="policyStatusBadge">Policy</span>
+            </div>
+            <form class="policy-grid" id="policyForm">
+              <label class="toggle-row"><input id="policyEnabled" type="checkbox" /> 작업 제출 허용</label>
+              <label>허용 파티션<input id="policyPartitions" placeholder="gpu,cpu,batch" /></label>
+              <label>최대 CPU<input id="policyMaxCpu" type="number" min="1" value="64" /></label>
+              <label>최대 GPU<input id="policyMaxGpu" type="number" min="0" value="8" /></label>
+              <label>최대 메모리 GB<input id="policyMaxMemory" type="number" min="1" value="256" /></label>
+              <label>최대 시간 h<input id="policyMaxTime" type="number" min="1" value="24" /></label>
+              <label class="toggle-row"><input id="policyCustomScript" type="checkbox" checked /> 사용자 스크립트 허용</label>
+              <button class="primary-action" type="submit">정책 저장</button>
+            </form>
           </section>
         </section>
 
@@ -813,6 +846,26 @@
               </div>
               <div class="event-list" id="powerEventList"></div>
             </article>
+            <article class="panel ipmi-detail-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>IPMI 전력 / 흡기 온도</h2>
+                  <p>IPMI exporter의 전력 센서와 inlet/intake/ambient 온도를 장비별로 표시합니다.</p>
+                </div>
+                <span class="badge soft" id="ipmiDetailBadge">IPMI</span>
+              </div>
+              <div class="ipmi-summary" id="ipmiSummary"></div>
+              <div class="ipmi-sensor-grid">
+                <div>
+                  <strong>흡기 온도</strong>
+                  <div class="sensor-list compact" id="ipmiInletList"></div>
+                </div>
+                <div>
+                  <strong>전력 센서</strong>
+                  <div class="sensor-list compact" id="ipmiPowerList"></div>
+                </div>
+              </div>
+            </article>
           </section>
         </section>
 
@@ -907,6 +960,16 @@
                 </div>
                 <div class="log-source-list" id="logSourceList"></div>
               </article>
+
+              <article class="panel log-panel audit-log-panel">
+                <div class="panel-header compact">
+                  <div>
+                    <h2>감사 로그</h2>
+                    <p>로그인, 작업 제출/취소, 정책 변경, Prometheus 설정 변경을 기록합니다.</p>
+                  </div>
+                </div>
+                <div class="audit-list" id="auditLogList"></div>
+              </article>
             </aside>
           </section>
         </section>
@@ -960,6 +1023,27 @@
                 </div>
               </div>
               <div class="target-list" id="settingsTargets"></div>
+            </article>
+
+            <article class="panel settings-panel prometheus-wizard-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>Prometheus 설정 웹 마법사</h2>
+                  <p>Prometheus URL과 exporter target 목록을 저장하고 연결을 테스트합니다.</p>
+                </div>
+                <span class="badge soft" id="promWizardStatus">Wizard</span>
+              </div>
+              <form class="wizard-grid" id="prometheusWizardForm">
+                <label>Prometheus URL<input id="prometheusUrlInput" placeholder="http://localhost:9090" /></label>
+                <label>node_exporter targets<textarea id="prometheusNodeTargets" rows="3" placeholder="node01:9100&#10;node02:9100"></textarea></label>
+                <label>dcgm_exporter targets<textarea id="prometheusDcgmTargets" rows="3" placeholder="gpu01:9400"></textarea></label>
+                <label>ipmi_exporter targets<textarea id="prometheusIpmiTargets" rows="3" placeholder="bmc01:9290"></textarea></label>
+                <div class="wizard-actions">
+                  <button class="ghost-action" id="testPrometheusWizard" type="button">연결 테스트</button>
+                  <button class="primary-action" type="submit">설정 저장</button>
+                </div>
+              </form>
+              <div class="wizard-result" id="prometheusWizardResult"></div>
             </article>
 
             <article class="panel settings-panel">
@@ -1042,7 +1126,7 @@ date</textarea>
       </form>
     </dialog>
 
-    <script type="module" src="./hardware3d.js?v=20260624-enterprise3"></script>
-    <script src="./app.js?v=20260624-enterprise3"></script>
+    <script type="module" src="./hardware3d.js?v=20260624-ops1"></script>
+    <script src="./app.js?v=20260624-ops1"></script>
   </body>
 </html>

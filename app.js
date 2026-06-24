@@ -8,6 +8,10 @@ let latestSummary = null;
 let latestSystem = null;
 let latestDiscovery = null;
 let latestLogs = null;
+let latestIpmi = null;
+let latestAudit = null;
+let latestJobPolicy = null;
+let latestPrometheusConfig = null;
 let loadHistory = [];
 let powerHistory = [];
 let graphHistory = [];
@@ -451,6 +455,57 @@ function renderJobs(query = "") {
       <td>${statusLabel(job.status)}</td>
       <td>${job.resource || job.tres || "-"}</td>
       <td>${job.time || job.time_left || "-"}</td>
+    `;
+    row.title = `${job.name || ""} ${job.reason || ""}`.trim();
+    jobTable.appendChild(row);
+  });
+}
+
+function renderJobFilters() {
+  const userFilter = document.querySelector("#jobUserFilter");
+  const stateFilter = document.querySelector("#jobStateFilter");
+  if (userFilter) {
+    const current = userFilter.value || "all";
+    const users = Array.from(new Set(jobs.map((job) => job.user).filter(Boolean))).sort();
+    userFilter.innerHTML = `<option value="all">모든 사용자</option>${users.map((user) => `<option value="${escapeHtml(user)}">${escapeHtml(user)}</option>`).join("")}`;
+    userFilter.value = users.includes(current) ? current : "all";
+  }
+  if (stateFilter && !stateFilter.value) stateFilter.value = "all";
+}
+
+function renderJobs(query = "") {
+  const normalized = query.trim().toLowerCase();
+  renderJobFilters();
+  const userFilter = document.querySelector("#jobUserFilter")?.value || "all";
+  const stateFilter = document.querySelector("#jobStateFilter")?.value || "all";
+  const filtered = jobs.filter((job) => {
+    const queryOk = !normalized || JSON.stringify(job).toLowerCase().includes(normalized);
+    const userOk = userFilter === "all" || job.user === userFilter;
+    const stateOk = stateFilter === "all" || jobStatusType(job.status) === stateFilter;
+    return queryOk && userOk && stateOk;
+  }).slice(0, 80);
+  jobTable.innerHTML = "";
+  renderJobInsights();
+
+  if (!filtered.length) {
+    jobTable.innerHTML = `
+      <tr>
+        <td class="table-empty" colspan="7">작업 데이터 없음. Slurm squeue가 연결되면 실제 작업이 표시됩니다.</td>
+      </tr>
+    `;
+    return;
+  }
+
+  filtered.forEach((job) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${escapeHtml(job.id)}</td>
+      <td>${escapeHtml(job.user)}</td>
+      <td>${escapeHtml(job.partition)}</td>
+      <td>${statusLabel(job.status)}</td>
+      <td>${escapeHtml(job.resource || job.tres || "-")}</td>
+      <td>${escapeHtml(job.time || job.time_left || "-")}</td>
+      <td><button class="danger-action job-cancel" type="button" data-job-id="${escapeHtml(job.id)}">취소</button></td>
     `;
     row.title = `${job.name || ""} ${job.reason || ""}`.trim();
     jobTable.appendChild(row);
@@ -1329,6 +1384,99 @@ function renderSettings(discovery) {
   }
 }
 
+function renderJobPolicy(policy = {}) {
+  latestJobPolicy = policy;
+  const enabled = !!policy.enabled;
+  const allowed = Array.isArray(policy.allowed_partitions) ? policy.allowed_partitions : [];
+  const setValue = (selector, value) => {
+    const element = document.querySelector(selector);
+    if (element) element.value = value ?? "";
+  };
+  const setChecked = (selector, value) => {
+    const element = document.querySelector(selector);
+    if (element) element.checked = !!value;
+  };
+  setChecked("#policyEnabled", enabled);
+  setValue("#policyPartitions", allowed.join(","));
+  setValue("#policyMaxCpu", policy.max_cpu ?? 64);
+  setValue("#policyMaxGpu", policy.max_gpu ?? 8);
+  setValue("#policyMaxMemory", policy.max_memory_gb ?? 256);
+  setValue("#policyMaxTime", policy.max_time_hours ?? 24);
+  setChecked("#policyCustomScript", policy.allow_custom_script !== false);
+  setText("#policyStatusBadge", enabled ? "제출 허용" : "제출 차단");
+}
+
+function renderPrometheusWizard(config = {}) {
+  latestPrometheusConfig = config;
+  const setValue = (selector, value) => {
+    const element = document.querySelector(selector);
+    if (element && document.activeElement !== element) element.value = value ?? "";
+  };
+  setValue("#prometheusUrlInput", config.url || latestDiscovery?.prometheus?.url || "http://localhost:9090");
+  setValue("#prometheusNodeTargets", (config.node_targets || []).join("\n"));
+  setValue("#prometheusDcgmTargets", (config.dcgm_targets || []).join("\n"));
+  setValue("#prometheusIpmiTargets", (config.ipmi_targets || []).join("\n"));
+  setText("#promWizardStatus", latestDiscovery?.prometheus?.ready ? "연결됨" : "확인 필요");
+}
+
+function sensorRow(item, unit = "") {
+  const value = Number(item?.value);
+  const display = Number.isFinite(value) ? `${Math.round(value * 10) / 10}${unit}` : "N/A";
+  return `
+    <div class="sensor-row">
+      <div>
+        <strong>${escapeHtml(item?.name || "-")}</strong>
+        <span>${escapeHtml(item?.instance || item?.type || "-")}</span>
+      </div>
+      <b>${escapeHtml(display)}</b>
+    </div>
+  `;
+}
+
+function renderIpmiDetails(data = {}) {
+  const summary = data.summary || {};
+  setText("#ipmiDetailBadge", summary.targets ? `${summary.up || 0}/${summary.targets} up` : "IPMI 없음");
+  const summaryTarget = document.querySelector("#ipmiSummary");
+  if (summaryTarget) {
+    summaryTarget.innerHTML = `
+      <div><span>Targets</span><strong>${summary.targets ?? 0}</strong></div>
+      <div><span>흡기 최고</span><strong>${summary.inlet_max == null ? "N/A" : `${Math.round(summary.inlet_max)}°C`}</strong></div>
+      <div><span>전력 합계</span><strong>${summary.power_sum ? `${Math.round(summary.power_sum)} W` : "N/A"}</strong></div>
+    `;
+  }
+  const inlet = data.inlet_temperatures || [];
+  const power = data.power_readings || [];
+  const inletTarget = document.querySelector("#ipmiInletList");
+  const powerTarget = document.querySelector("#ipmiPowerList");
+  if (inletTarget) {
+    inletTarget.innerHTML = inlet.length
+      ? inlet.slice(0, 12).map((item) => sensorRow(item, "°C")).join("")
+      : `<div class="empty-inline"><strong>흡기 온도 없음</strong><span>IPMI exporter의 inlet/intake/ambient 센서가 감지되면 표시됩니다.</span></div>`;
+  }
+  if (powerTarget) {
+    powerTarget.innerHTML = power.length
+      ? power.slice(0, 12).map((item) => sensorRow(item, " W")).join("")
+      : `<div class="empty-inline"><strong>전력 센서 없음</strong><span>IPMI power/watt 센서가 감지되면 표시됩니다.</span></div>`;
+  }
+}
+
+function renderAuditLogs(data = {}) {
+  const target = document.querySelector("#auditLogList");
+  if (!target) return;
+  const rows = data.audit || [];
+  target.innerHTML = rows.length
+    ? rows.slice(0, 12).map((item) => `
+        <div class="audit-row ${item.status === "ok" ? "ok" : "warn"}">
+          <span></span>
+          <div>
+            <strong>${escapeHtml(item.action || "-")}</strong>
+            <small>${escapeHtml(item.user || "system")} · ${escapeHtml(formatDateShort(item.time))}</small>
+          </div>
+        </div>
+      `).join("")
+    : `<div class="empty-inline"><strong>감사 로그 없음</strong><span>로그인, 제출, 취소, 정책 변경 시 기록됩니다.</span></div>`;
+}
+
 function updateMetrics(summary, system) {
   const systemCpu = Number(system?.cpu?.usage_percent);
   const slurmCpu = Number(summary?.cpu_usage_percent);
@@ -1425,20 +1573,26 @@ ${body}`;
 }
 
 async function refreshData() {
-  const [summary, system, nodeData, jobData, targetData, discoveryData, logData] = await Promise.all([
+  const [summary, system, nodeData, jobData, targetData, discoveryData, logData, ipmiData, auditData, policyData, promConfigData] = await Promise.all([
     loadOptional("/api/summary", {}),
     loadOptional("/api/system", {}),
     loadOptional("/api/nodes", { nodes: [] }),
     loadOptional("/api/jobs", { jobs: [] }),
     loadOptional("/api/targets", { targets: [] }),
     loadOptional("/api/discovery", {}),
-    loadOptional("/api/logs?limit=220", { logs: [], summary: {}, sources: [] })
+    loadOptional("/api/logs?limit=220", { logs: [], summary: {}, sources: [] }),
+    loadOptional("/api/ipmi", { targets: [], sensors: [], inlet_temperatures: [], power_readings: [], summary: {} }),
+    loadOptional("/api/audit?limit=120", { audit: [], summary: {} }),
+    loadOptional("/api/job-policy", { policy: {} }),
+    loadOptional("/api/prometheus/config", { prometheus: {} })
   ]);
 
   latestSummary = summary.unavailable ? null : summary;
   latestSystem = system.unavailable ? null : system;
   latestDiscovery = discoveryData.unavailable ? null : discoveryData;
   latestLogs = logData.unavailable ? { logs: [], summary: {}, sources: [], error: logData.error } : logData;
+  latestIpmi = ipmiData.unavailable ? { targets: [], sensors: [], inlet_temperatures: [], power_readings: [], summary: {} } : ipmiData;
+  latestAudit = auditData.unavailable ? { audit: [], summary: {} } : auditData;
   latestNodes = nodeData.nodes || [];
   latestTargets = targetData.targets || [];
   jobs = jobData.jobs || [];
@@ -1451,8 +1605,12 @@ async function refreshData() {
   renderAlerts();
   renderSettings(latestDiscovery);
   renderLogs();
+  renderIpmiDetails(latestIpmi);
+  renderAuditLogs(latestAudit);
+  renderJobPolicy(policyData.policy || latestDiscovery?.job_policy || {});
+  renderPrometheusWizard(promConfigData.prometheus || latestDiscovery?.prometheus || {});
 
-  const connected = !summary.unavailable || !system.unavailable || !nodeData.unavailable || !jobData.unavailable || !targetData.unavailable || !discoveryData.unavailable || !logData.unavailable;
+  const connected = !summary.unavailable || !system.unavailable || !nodeData.unavailable || !jobData.unavailable || !targetData.unavailable || !discoveryData.unavailable || !logData.unavailable || !ipmiData.unavailable;
   setApiState(connected ? "Live API" : "No API", connected);
 }
 
@@ -1497,6 +1655,91 @@ jobForm.addEventListener("submit", async (event) => {
 
 document.querySelector("#refreshJobs").addEventListener("click", async () => {
   await refreshData();
+});
+
+document.querySelector("#jobUserFilter")?.addEventListener("change", () => renderJobs(searchInput.value));
+document.querySelector("#jobStateFilter")?.addEventListener("change", () => renderJobs(searchInput.value));
+
+jobTable?.addEventListener("click", async (event) => {
+  const button = event.target.closest(".job-cancel");
+  if (!button) return;
+  const jobId = button.dataset.jobId;
+  if (!jobId) return;
+  const ok = confirm(`Slurm 작업 ${jobId}을 scancel로 취소할까요?`);
+  if (!ok) return;
+  try {
+    button.disabled = true;
+    await apiPost(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { reason: "cancelled from D-aquila" });
+    await refreshData();
+  } catch (error) {
+    alert(`작업 취소 실패: ${error.message}`);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.querySelector("#policyForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = {
+    enabled: !!document.querySelector("#policyEnabled")?.checked,
+    allowed_partitions: String(document.querySelector("#policyPartitions")?.value || "").split(",").map((item) => item.trim()).filter(Boolean),
+    max_cpu: Number(document.querySelector("#policyMaxCpu")?.value || 64),
+    max_gpu: Number(document.querySelector("#policyMaxGpu")?.value || 8),
+    max_memory_gb: Number(document.querySelector("#policyMaxMemory")?.value || 256),
+    max_time_hours: Number(document.querySelector("#policyMaxTime")?.value || 24),
+    allow_custom_script: !!document.querySelector("#policyCustomScript")?.checked
+  };
+  try {
+    const data = await apiPost("/api/job-policy", payload);
+    renderJobPolicy(data.policy || payload);
+    await refreshData();
+  } catch (error) {
+    alert(`정책 저장 실패: ${error.message}`);
+  }
+});
+
+function prometheusWizardPayload() {
+  return {
+    url: document.querySelector("#prometheusUrlInput")?.value || "http://localhost:9090",
+    node_targets: String(document.querySelector("#prometheusNodeTargets")?.value || "").split(/\n|,/).map((item) => item.trim()).filter(Boolean),
+    dcgm_targets: String(document.querySelector("#prometheusDcgmTargets")?.value || "").split(/\n|,/).map((item) => item.trim()).filter(Boolean),
+    ipmi_targets: String(document.querySelector("#prometheusIpmiTargets")?.value || "").split(/\n|,/).map((item) => item.trim()).filter(Boolean)
+  };
+}
+
+function showPrometheusWizardResult(result) {
+  const target = document.querySelector("#prometheusWizardResult");
+  if (!target) return;
+  const ok = !!result?.test?.ok;
+  target.innerHTML = `
+    <div class="check-row ${ok ? "ok" : "warn"}">
+      <span></span>
+      <div>
+        <strong>${ok ? "Prometheus 연결 성공" : "Prometheus 연결 확인 필요"}</strong>
+        <small>${escapeHtml(result?.test?.detail || "-")}</small>
+      </div>
+    </div>
+  `;
+}
+
+document.querySelector("#testPrometheusWizard")?.addEventListener("click", async () => {
+  try {
+    const result = await apiPost("/api/prometheus/test", prometheusWizardPayload());
+    showPrometheusWizardResult(result);
+  } catch (error) {
+    alert(`Prometheus 테스트 실패: ${error.message}`);
+  }
+});
+
+document.querySelector("#prometheusWizardForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const result = await apiPost("/api/prometheus/config", prometheusWizardPayload());
+    showPrometheusWizardResult(result);
+    await refreshData();
+  } catch (error) {
+    alert(`Prometheus 설정 저장 실패: ${error.message}`);
+  }
 });
 
 document.querySelector("#refreshSettings")?.addEventListener("click", async () => {

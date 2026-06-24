@@ -25,6 +25,9 @@ from pydantic import BaseModel, Field
 
 
 ROOT = Path(__file__).resolve().parents[1]
+GENERATED_DIR = ROOT / "generated"
+CONFIG_PATH = GENERATED_DIR / "d-aquila-config.json"
+AUDIT_LOG_PATH = GENERATED_DIR / "audit.log"
 PROMETHEUS_URL = os.getenv("D_AQUILA_PROMETHEUS_URL", "http://localhost:9090").rstrip("/")
 ENABLE_SUBMIT = os.getenv("D_AQUILA_ENABLE_SUBMIT", "false").lower() in {"1", "true", "yes", "on"}
 COMMAND_TIMEOUT = int(os.getenv("D_AQUILA_COMMAND_TIMEOUT", "10"))
@@ -32,6 +35,7 @@ AUTH_MODE = os.getenv("D_AQUILA_AUTH_MODE", "pam").lower()
 AUTH_SESSION_SECONDS = int(os.getenv("D_AQUILA_AUTH_SESSION_SECONDS", "28800"))
 SESSION_COOKIE = "d_aquila_session"
 SESSIONS: dict[str, dict[str, Any]] = {}
+RUNTIME_CONFIG: dict[str, Any] = {}
 
 
 app = FastAPI(title="D-aquila API", version="0.1.0")
@@ -70,6 +74,78 @@ class SubmitRequest(BaseModel):
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=120)
     password: str = Field(min_length=1, max_length=4096)
+
+
+class JobCancelRequest(BaseModel):
+    reason: str = Field(default="", max_length=240)
+
+
+class JobPolicyRequest(BaseModel):
+    enabled: bool = False
+    allowed_partitions: list[str] = Field(default_factory=list)
+    max_cpu: int = Field(default=64, ge=1, le=4096)
+    max_gpu: int = Field(default=8, ge=0, le=128)
+    max_memory_gb: int = Field(default=256, ge=1, le=4096)
+    max_time_hours: int = Field(default=24, ge=1, le=24 * 30)
+    allow_custom_script: bool = True
+
+
+class PrometheusConfigRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=300)
+    node_targets: list[str] = Field(default_factory=list)
+    dcgm_targets: list[str] = Field(default_factory=list)
+    ipmi_targets: list[str] = Field(default_factory=list)
+
+
+def default_policy() -> dict[str, Any]:
+    return {
+        "enabled": ENABLE_SUBMIT,
+        "allowed_partitions": [],
+        "max_cpu": 64,
+        "max_gpu": 8,
+        "max_memory_gb": 256,
+        "max_time_hours": 24,
+        "allow_custom_script": True,
+    }
+
+
+def load_runtime_config() -> dict[str, Any]:
+    GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+    if not CONFIG_PATH.exists():
+        return {"prometheus": {"url": PROMETHEUS_URL}, "job_policy": default_policy()}
+    try:
+        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    return {
+        "prometheus": {"url": PROMETHEUS_URL, **(data.get("prometheus") or {})},
+        "job_policy": {**default_policy(), **(data.get("job_policy") or {})},
+    }
+
+
+def save_runtime_config() -> None:
+    GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(RUNTIME_CONFIG, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def prometheus_base_url() -> str:
+    return str((RUNTIME_CONFIG.get("prometheus") or {}).get("url") or PROMETHEUS_URL).rstrip("/")
+
+
+def audit(action: str, user: str | None = None, detail: dict[str, Any] | None = None, status: str = "ok") -> None:
+    GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "time": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "user": user or "system",
+        "action": action,
+        "status": status,
+        "detail": detail or {},
+    }
+    with AUDIT_LOG_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+RUNTIME_CONFIG = load_runtime_config()
 
 
 def session_user(token: str | None) -> str | None:
@@ -132,14 +208,17 @@ def login(request: LoginRequest, response: Response) -> dict[str, Any]:
         secure=os.getenv("D_AQUILA_COOKIE_SECURE", "false").lower() in {"1", "true", "yes", "on"},
         max_age=AUTH_SESSION_SECONDS,
     )
+    audit("auth.login", request.username, {"auth_mode": AUTH_MODE})
     return {"authenticated": True, "username": request.username, "auth_mode": AUTH_MODE}
 
 
 @app.post("/api/auth/logout")
 def logout(response: Response, d_aquila_session: str | None = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
+    username = session_user(d_aquila_session)
     if d_aquila_session:
         SESSIONS.pop(d_aquila_session, None)
     response.delete_cookie(SESSION_COOKIE)
+    audit("auth.logout", username, {})
     return {"authenticated": False}
 
 
@@ -195,7 +274,7 @@ def run_command_optional(args: list[str], timeout: int | None = None) -> tuple[s
 
 def prometheus(path: str, params: dict[str, str] | None = None) -> Any:
     query = urllib.parse.urlencode(params or {})
-    url = f"{PROMETHEUS_URL}{path}"
+    url = f"{prometheus_base_url()}{path}"
     if query:
         url = f"{url}?{query}"
     try:
@@ -495,11 +574,118 @@ def log_summary(logs: list[dict[str, Any]], sources: list[dict[str, str]]) -> di
     }
 
 
+def parse_memory_gb(value: str) -> float:
+    text = str(value or "").strip().lower()
+    match = re.match(r"^(\d+(?:\.\d+)?)([kmgtp]?)b?$", text)
+    if not match:
+        return 0.0
+    number = float(match.group(1))
+    unit = match.group(2)
+    factors = {"": 1 / 1024, "k": 1 / (1024 * 1024), "m": 1 / 1024, "g": 1, "t": 1024, "p": 1024 * 1024}
+    return number * factors.get(unit, 1)
+
+
+def parse_time_hours(value: str) -> float:
+    text = str(value or "").strip()
+    days = 0
+    if "-" in text:
+        day_text, text = text.split("-", 1)
+        if day_text.isdigit():
+            days = int(day_text)
+    parts = [int(part) for part in text.split(":") if part.isdigit()]
+    if len(parts) == 3:
+        hours, minutes, seconds = parts
+    elif len(parts) == 2:
+        hours, minutes, seconds = 0, parts[0], parts[1]
+    elif len(parts) == 1:
+        hours, minutes, seconds = 0, parts[0], 0
+    else:
+        hours, minutes, seconds = 0, 0, 0
+    return days * 24 + hours + minutes / 60 + seconds / 3600
+
+
+def enforce_submit_policy(request: SubmitRequest) -> None:
+    policy = RUNTIME_CONFIG.get("job_policy") or default_policy()
+    if not policy.get("enabled", ENABLE_SUBMIT):
+        raise HTTPException(
+            status_code=403,
+            detail="Job submission is disabled in D-aquila policy.",
+        )
+    allowed = [item.strip() for item in policy.get("allowed_partitions", []) if item.strip()]
+    if allowed and request.partition not in allowed:
+        raise HTTPException(status_code=403, detail=f"Partition '{request.partition}' is not allowed by policy.")
+    if request.cpu > int(policy.get("max_cpu", 64)):
+        raise HTTPException(status_code=403, detail=f"CPU request exceeds policy limit: {policy.get('max_cpu')}")
+    if request.gpu > int(policy.get("max_gpu", 8)):
+        raise HTTPException(status_code=403, detail=f"GPU request exceeds policy limit: {policy.get('max_gpu')}")
+    if parse_memory_gb(request.memory) > float(policy.get("max_memory_gb", 256)):
+        raise HTTPException(status_code=403, detail=f"Memory request exceeds policy limit: {policy.get('max_memory_gb')}G")
+    if parse_time_hours(request.time) > float(policy.get("max_time_hours", 24)):
+        raise HTTPException(status_code=403, detail=f"Time request exceeds policy limit: {policy.get('max_time_hours')}h")
+
+
+def parse_target_lines(items: list[str]) -> list[str]:
+    targets: list[str] = []
+    for item in items:
+        for part in str(item).replace(",", "\n").splitlines():
+            target = part.strip()
+            if target:
+                targets.append(target)
+    return sorted(set(targets))
+
+
+def prometheus_test(url: str) -> dict[str, Any]:
+    clean = url.rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{clean}/api/v1/status/runtimeinfo", timeout=COMMAND_TIMEOUT) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        return {"ok": False, "detail": str(exc)}
+    return {"ok": payload.get("status") == "success", "detail": payload.get("status", "unknown")}
+
+
+def prom_vector(query: str) -> list[dict[str, Any]]:
+    try:
+        data = prometheus("/api/v1/query", {"query": query})
+        return data.get("result", [])
+    except HTTPException:
+        return []
+
+
+def prom_series_value(query: str) -> list[dict[str, Any]]:
+    rows = []
+    for item in prom_vector(query):
+        metric = item.get("metric", {})
+        value = item.get("value", [None, None])[1]
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            numeric = None
+        rows.append({"metric": metric, "value": numeric})
+    return rows
+
+
+def read_audit(limit: int) -> list[dict[str, Any]]:
+    if not AUDIT_LOG_PATH.exists():
+        return []
+    try:
+        lines = AUDIT_LOG_PATH.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    rows = []
+    for line in lines[-limit:]:
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return list(reversed(rows))
+
+
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "prometheus_url": PROMETHEUS_URL,
+        "prometheus_url": prometheus_base_url(),
         "submit_enabled": ENABLE_SUBMIT,
     }
 
@@ -536,11 +722,12 @@ def discovery() -> dict[str, Any]:
         "slurm_config_paths": slurm_config_paths,
         "munge_sockets": munge_sockets,
         "prometheus": {
-            "url": PROMETHEUS_URL,
+            "url": prometheus_base_url(),
             "ready": prometheus_ready,
             "targets_by_job": prometheus_targets,
         },
-        "submit_enabled": ENABLE_SUBMIT,
+        "submit_enabled": bool((RUNTIME_CONFIG.get("job_policy") or {}).get("enabled", ENABLE_SUBMIT)),
+        "job_policy": RUNTIME_CONFIG.get("job_policy") or default_policy(),
         "auth": {
             "mode": AUTH_MODE,
             "pam_available": pam_available(),
@@ -666,6 +853,53 @@ def targets() -> dict[str, Any]:
     }
 
 
+@app.get("/api/ipmi")
+def ipmi_details() -> dict[str, Any]:
+    targets_data = {"targets": []}
+    try:
+        targets_data = targets()
+    except HTTPException:
+        targets_data = {"targets": []}
+    ipmi_targets = [target for target in targets_data.get("targets", []) if "ipmi" in target.get("job", "").lower()]
+    sensor_rows = prom_series_value('ipmi_sensor_value')
+    sensors = []
+    inlet = []
+    power = []
+    for row in sensor_rows:
+        metric = row.get("metric", {})
+        value = row.get("value")
+        name = str(metric.get("name") or metric.get("sensor") or metric.get("id") or "").lower()
+        sensor_type = str(metric.get("type") or "").lower()
+        instance = str(metric.get("instance") or "")
+        item = {
+            "instance": instance,
+            "name": metric.get("name") or metric.get("sensor") or metric.get("id") or "-",
+            "type": metric.get("type") or "-",
+            "value": value,
+        }
+        sensors.append(item)
+        if value is None:
+            continue
+        if "temp" in sensor_type or "temp" in name:
+            if any(word in name for word in ["inlet", "intake", "ambient", "front"]):
+                inlet.append(item)
+        if "power" in sensor_type or "watt" in name or "pwr" in name or "power" in name:
+            power.append(item)
+
+    return {
+        "targets": ipmi_targets,
+        "sensors": sensors[:200],
+        "inlet_temperatures": inlet[:80],
+        "power_readings": power[:80],
+        "summary": {
+            "targets": len(ipmi_targets),
+            "up": sum(1 for target in ipmi_targets if target.get("health") == "up"),
+            "inlet_max": max([item["value"] for item in inlet if item.get("value") is not None], default=None),
+            "power_sum": sum(item["value"] for item in power if item.get("value") is not None),
+        },
+    }
+
+
 @app.get("/api/logs")
 def logs(limit: int = 180) -> dict[str, Any]:
     safe_limit = max(20, min(limit, 500))
@@ -681,6 +915,20 @@ def logs(limit: int = 180) -> dict[str, Any]:
         "sources": sources,
         "host": socket.gethostname(),
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+
+
+@app.get("/api/audit")
+def audit_logs(limit: int = 120) -> dict[str, Any]:
+    safe_limit = max(20, min(limit, 500))
+    rows = read_audit(safe_limit)
+    return {
+        "audit": rows,
+        "summary": {
+            "total": len(rows),
+            "failed": sum(1 for item in rows if item.get("status") != "ok"),
+            "users": len({item.get("user") for item in rows if item.get("user")}),
+        },
     }
 
 
@@ -709,7 +957,7 @@ def partitions() -> dict[str, Any]:
 
 
 @app.get("/api/jobs")
-def jobs() -> dict[str, Any]:
+def jobs(user: str | None = None, state: str | None = None) -> dict[str, Any]:
     fmt = "%i|%j|%t|%u|%g|%P|%q|%D|%R|%c|%b|%l|%L|%Q"
     output = run_command(["squeue", "-h", "-o", fmt])
     rows = []
@@ -723,25 +971,28 @@ def jobs() -> dict[str, Any]:
         resource = f"{cpu} CPU"
         if tres:
             resource = f"{tres} / {resource}"
-        rows.append(
-            {
-                "id": parts[0].strip(),
-                "name": parts[1].strip(),
-                "status": state_map.get(parts[2].strip(), parts[2].strip()),
-                "user": parts[3].strip(),
-                "group": parts[4].strip(),
-                "partition": parts[5].strip(),
-                "qos": parts[6].strip(),
-                "nodes": parts[7].strip(),
-                "reason": parts[8].strip().strip("()"),
-                "min_cpus": cpu.strip(),
-                "tres": tres.strip(),
-                "resource": resource,
-                "limit": parts[11].strip(),
-                "time": parts[12].strip(),
-                "priority": parts[13].strip(),
-            }
-        )
+        row = {
+            "id": parts[0].strip(),
+            "name": parts[1].strip(),
+            "status": state_map.get(parts[2].strip(), parts[2].strip()),
+            "user": parts[3].strip(),
+            "group": parts[4].strip(),
+            "partition": parts[5].strip(),
+            "qos": parts[6].strip(),
+            "nodes": parts[7].strip(),
+            "reason": parts[8].strip().strip("()"),
+            "min_cpus": cpu.strip(),
+            "tres": tres.strip(),
+            "resource": resource,
+            "limit": parts[11].strip(),
+            "time": parts[12].strip(),
+            "priority": parts[13].strip(),
+        }
+        if user and row["user"] != user:
+            continue
+        if state and row["status"] != state:
+            continue
+        rows.append(row)
     return {"jobs": rows}
 
 
@@ -779,12 +1030,9 @@ def nodes() -> dict[str, Any]:
 
 
 @app.post("/api/jobs/submit")
-def submit_job(request: SubmitRequest) -> dict[str, Any]:
-    if not ENABLE_SUBMIT:
-        raise HTTPException(
-            status_code=403,
-            detail="Job submission is disabled. Set D_AQUILA_ENABLE_SUBMIT=true on the login node to enable sbatch.",
-        )
+def submit_job(request: SubmitRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
+    user = session_user(username)
+    enforce_submit_policy(request)
 
     with tempfile.NamedTemporaryFile("w", suffix=".sbatch", prefix="d-aquila-", delete=False) as handle:
         handle.write(request.script)
@@ -792,6 +1040,7 @@ def submit_job(request: SubmitRequest) -> dict[str, Any]:
 
     try:
         output = run_command(["sbatch", script_path])
+        audit("job.submit", user, {"name": request.name, "partition": request.partition, "cpu": request.cpu, "gpu": request.gpu}, "ok")
     finally:
         try:
             os.unlink(script_path)
@@ -800,6 +1049,62 @@ def submit_job(request: SubmitRequest) -> dict[str, Any]:
 
     match = re.search(r"Submitted batch job (\S+)", output)
     return {"submitted": True, "job_id": match.group(1) if match else None, "output": output.strip()}
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str, request: JobCancelRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
+    user = session_user(username)
+    if not re.match(r"^[A-Za-z0-9_.-]+$", job_id):
+        raise HTTPException(status_code=400, detail="Invalid job id")
+    output = run_command(["scancel", job_id])
+    audit("job.cancel", user, {"job_id": job_id, "reason": request.reason}, "ok")
+    return {"cancelled": True, "job_id": job_id, "output": output.strip()}
+
+
+@app.get("/api/job-policy")
+def get_job_policy() -> dict[str, Any]:
+    return {"policy": RUNTIME_CONFIG.get("job_policy") or default_policy()}
+
+
+@app.post("/api/job-policy")
+def set_job_policy(request: JobPolicyRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
+    user = session_user(username)
+    policy = request.model_dump() if hasattr(request, "model_dump") else request.dict()
+    policy["allowed_partitions"] = sorted(set(item.strip() for item in policy["allowed_partitions"] if item.strip()))
+    RUNTIME_CONFIG["job_policy"] = policy
+    save_runtime_config()
+    audit("policy.update", user, policy, "ok")
+    return {"policy": policy}
+
+
+@app.get("/api/prometheus/config")
+def get_prometheus_config() -> dict[str, Any]:
+    config = RUNTIME_CONFIG.get("prometheus") or {"url": prometheus_base_url()}
+    return {"prometheus": {"url": prometheus_base_url(), **config}}
+
+
+@app.post("/api/prometheus/config")
+def set_prometheus_config(request: PrometheusConfigRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
+    user = session_user(username)
+    config = {
+        "url": request.url.rstrip("/"),
+        "node_targets": parse_target_lines(request.node_targets),
+        "dcgm_targets": parse_target_lines(request.dcgm_targets),
+        "ipmi_targets": parse_target_lines(request.ipmi_targets),
+    }
+    RUNTIME_CONFIG["prometheus"] = config
+    save_runtime_config()
+    result = prometheus_test(config["url"])
+    audit("prometheus.update", user, {**config, "test": result}, "ok" if result["ok"] else "warn")
+    return {"prometheus": config, "test": result}
+
+
+@app.post("/api/prometheus/test")
+def test_prometheus_config(request: PrometheusConfigRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
+    user = session_user(username)
+    result = prometheus_test(request.url)
+    audit("prometheus.test", user, {"url": request.url, "result": result}, "ok" if result["ok"] else "warn")
+    return {"test": result}
 
 
 app.mount("/", StaticFiles(directory=ROOT, html=True), name="static")
