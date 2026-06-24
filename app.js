@@ -10,6 +10,7 @@ let latestDiscovery = null;
 let latestLogs = null;
 let latestIpmi = null;
 let latestAudit = null;
+let latestJobError = "";
 let latestJobPolicy = null;
 let latestPrometheusConfig = null;
 let latestAccessModel = null;
@@ -496,6 +497,50 @@ function renderJobs(query = "") {
     jobTable.innerHTML = `
       <tr>
         <td class="table-empty" colspan="7">작업 데이터 없음. Slurm squeue가 연결되면 실제 작업이 표시됩니다.</td>
+      </tr>
+    `;
+    return;
+  }
+
+  filtered.forEach((job) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${escapeHtml(job.id)}</td>
+      <td>${escapeHtml(job.user)}</td>
+      <td>${escapeHtml(job.partition)}</td>
+      <td>${statusLabel(job.status)}</td>
+      <td>${escapeHtml(job.resource || job.tres || "-")}</td>
+      <td>${escapeHtml(job.time || job.time_left || "-")}</td>
+      <td><button class="danger-action job-cancel" type="button" data-job-id="${escapeHtml(job.id)}">취소</button></td>
+    `;
+    row.title = `${job.name || ""} ${job.reason || ""}`.trim();
+    jobTable.appendChild(row);
+  });
+}
+
+function renderJobs(query = "") {
+  const normalized = query.trim().toLowerCase();
+  renderJobFilters();
+  const userFilter = document.querySelector("#jobUserFilter")?.value || "all";
+  const stateFilter = document.querySelector("#jobStateFilter")?.value || "all";
+  const filtered = jobs.filter((job) => {
+    const queryOk = !normalized || JSON.stringify(job).toLowerCase().includes(normalized);
+    const userOk = userFilter === "all" || job.user === userFilter;
+    const stateOk = stateFilter === "all" || jobStatusType(job.status) === stateFilter;
+    return queryOk && userOk && stateOk;
+  }).slice(0, 80);
+
+  jobTable.innerHTML = "";
+  renderJobInsights();
+
+  if (!filtered.length) {
+    const emptyTitle = latestJobError ? "Slurm squeue 확인 필요" : "작업 데이터 없음";
+    const emptyDetail = latestJobError
+      ? `squeue 실행 오류: ${escapeHtml(latestJobError)}`
+      : "현재 표시할 작업이 없습니다. 실행/대기 작업이 생기면 여기에 표시됩니다.";
+    jobTable.innerHTML = `
+      <tr>
+        <td class="table-empty" colspan="7"><strong>${emptyTitle}</strong><br>${emptyDetail}</td>
       </tr>
     `;
     return;
@@ -1696,6 +1741,7 @@ async function refreshData() {
   latestAudit = auditData.unavailable ? { audit: [], summary: {} } : auditData;
   latestNodes = nodeData.nodes || [];
   latestTargets = targetData.targets || [];
+  latestJobError = jobData.unavailable ? (jobData.error || "Slurm squeue request failed") : "";
   jobs = jobData.jobs || [];
   racks = groupNodes(latestNodes);
 
