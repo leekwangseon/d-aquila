@@ -101,24 +101,22 @@ detect_prometheus() {
     *) die "D_AQUILA_BUNDLED_PROMETHEUS must be true, false, or auto." ;;
   esac
 
-  if [ "$BUNDLED_PROMETHEUS" = "true" ]; then
-    log "Bundled Prometheus is forced on at $PROMETHEUS_URL"
-    return
-  fi
-
   for url in "$PROMETHEUS_URL" "http://localhost:9090" "http://127.0.0.1:9090"; do
     if curl -fsS "$url/-/ready" >/dev/null 2>&1; then
       PROMETHEUS_URL="$url"
-      if [ "$BUNDLED_PROMETHEUS" = "auto" ]; then
-        BUNDLED_PROMETHEUS="false"
-      fi
-      log "Detected Prometheus at $PROMETHEUS_URL"
+      BUNDLED_PROMETHEUS="false"
+      log "Detected existing Prometheus at $PROMETHEUS_URL. Bundled Prometheus will not be started."
       return
     fi
   done
 
   if [ "$BUNDLED_PROMETHEUS" = "false" ]; then
     log "Bundled Prometheus is disabled. Using configured URL: $PROMETHEUS_URL"
+    return
+  fi
+
+  if [ "$BUNDLED_PROMETHEUS" = "true" ]; then
+    log "Bundled Prometheus is enabled and no existing Prometheus was detected at $PROMETHEUS_URL."
     return
   fi
 
