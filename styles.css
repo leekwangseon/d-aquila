@@ -3517,6 +3517,83 @@ tr:hover td {
   grid-column: auto;
 }
 
+.ops-admin-panel {
+  grid-column: 1 / -1;
+}
+
+.ops-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ops-grid label {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  color: #5f6f82;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ops-grid input,
+.ops-grid textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(184, 195, 209, 0.86);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.ops-grid input {
+  height: 40px;
+  padding: 0 11px;
+}
+
+.ops-wide {
+  grid-column: 1 / -1;
+}
+
+.ops-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ops-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid rgba(215, 222, 232, 0.78);
+  border-radius: 7px;
+  background: rgba(246, 249, 252, 0.92);
+}
+
+.ops-row strong,
+.ops-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ops-row small {
+  color: #66778b;
+}
+
+.ops-row.approved {
+  border-color: rgba(23, 138, 90, 0.26);
+  background: #eefaf7;
+}
+
+.ops-row.rejected {
+  border-color: rgba(189, 59, 53, 0.26);
+  background: #fff0ef;
+}
+
 .ipmi-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3615,6 +3692,7 @@ tr:hover td {
 
   .policy-grid,
   .wizard-grid,
+  .ops-grid,
   .ipmi-sensor-grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -3655,6 +3733,7 @@ tr:hover td {
 
   .policy-grid,
   .wizard-grid,
+  .ops-grid,
   .ipmi-summary,
   .ipmi-sensor-grid {
     grid-template-columns: 1fr;
@@ -3662,6 +3741,7 @@ tr:hover td {
 
   .wizard-grid label:first-child,
   .wizard-result,
+  .ops-wide,
   .policy-grid .toggle-row:first-child,
   .wizard-actions {
     grid-column: auto;

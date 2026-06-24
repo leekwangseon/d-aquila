@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>D-aquila | HPC Operations Platform</title>
-    <link rel="stylesheet" href="./styles.css?v=20260624-ops1" />
+    <link rel="stylesheet" href="./styles.css?v=20260624-platform1" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -1040,10 +1040,86 @@
                 <label>ipmi_exporter targets<textarea id="prometheusIpmiTargets" rows="3" placeholder="bmc01:9290"></textarea></label>
                 <div class="wizard-actions">
                   <button class="ghost-action" id="testPrometheusWizard" type="button">연결 테스트</button>
+                  <button class="ghost-action" id="applyPrometheusWizard" type="button">파일 반영/리로드</button>
                   <button class="primary-action" type="submit">설정 저장</button>
                 </div>
               </form>
               <div class="wizard-result" id="prometheusWizardResult"></div>
+            </article>
+
+            <article class="panel settings-panel ops-admin-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>사용자/그룹별 권한 모델</h2>
+                  <p>OS 계정과 그룹 기준으로 admin, operator, viewer 권한을 나눕니다.</p>
+                </div>
+                <span class="badge soft" id="currentRoleBadge">Role</span>
+              </div>
+              <form class="ops-grid" id="accessModelForm">
+                <label>Admin users<input id="accessAdminUsers" placeholder="root,admin1" /></label>
+                <label>Operator users<input id="accessOperatorUsers" placeholder="ops1,ops2" /></label>
+                <label>Viewer users<input id="accessViewerUsers" placeholder="guest1" /></label>
+                <label>Admin groups<input id="accessAdminGroups" placeholder="root,wheel" /></label>
+                <label>Operator groups<input id="accessOperatorGroups" placeholder="hpc-ops" /></label>
+                <label>Viewer groups<input id="accessViewerGroups" placeholder="hpc-users" /></label>
+                <button class="primary-action" type="submit">권한 저장</button>
+              </form>
+            </article>
+
+            <article class="panel settings-panel ops-admin-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>작업 템플릿 / 승인 워크플로우</h2>
+                  <p>반복 작업 템플릿을 만들고, 승인 큐에서 제출 요청을 검토합니다.</p>
+                </div>
+              </div>
+              <form class="ops-grid" id="templateForm">
+                <label>템플릿 이름<input id="templateName" placeholder="GPU 학습 기본" /></label>
+                <label>파티션<input id="templatePartition" placeholder="gpu" /></label>
+                <label>CPU<input id="templateCpu" type="number" min="1" value="8" /></label>
+                <label>GPU<input id="templateGpu" type="number" min="0" value="1" /></label>
+                <label>메모리<input id="templateMemory" value="64G" /></label>
+                <label>시간<input id="templateTime" value="04:00:00" /></label>
+                <label class="ops-wide">스크립트<textarea id="templateScript" rows="5">#!/bin/bash&#10;nvidia-smi&#10;hostname&#10;date</textarea></label>
+                <label class="toggle-row"><input id="templateRequiresApproval" type="checkbox" checked /> 승인 필요</label>
+                <button class="primary-action" type="submit">템플릿 저장</button>
+              </form>
+              <div class="ops-list" id="templateList"></div>
+              <div class="ops-list" id="approvalList"></div>
+            </article>
+
+            <article class="panel settings-panel ops-admin-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>다중 랙 / 전산실 배치 관리</h2>
+                  <p>전산실, 층, 랙, PDU 용량을 운영 메타데이터로 관리합니다.</p>
+                </div>
+              </div>
+              <form class="ops-grid" id="facilityForm">
+                <label class="ops-wide">Rooms JSON<textarea id="facilityRooms" rows="5"></textarea></label>
+                <label class="ops-wide">Racks JSON<textarea id="facilityRacks" rows="5"></textarea></label>
+                <button class="primary-action" type="submit">배치 저장</button>
+              </form>
+              <div class="ops-list" id="facilitySummary"></div>
+            </article>
+
+            <article class="panel settings-panel ops-admin-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>알림 채널 연동</h2>
+                  <p>Webhook 기반 알림 채널과 이벤트 종류를 관리합니다.</p>
+                </div>
+              </div>
+              <form class="ops-grid" id="alertChannelForm">
+                <label class="ops-wide">Webhook URL<input id="alertWebhookUrl" placeholder="https://example.com/webhook" /></label>
+                <label>Email recipients<input id="alertEmails" placeholder="ops@example.com" /></label>
+                <label>Enabled events<input id="alertEvents" placeholder="job.submit,job.cancel,approval.request,alert.test" /></label>
+                <div class="wizard-actions">
+                  <button class="ghost-action" id="testAlertChannel" type="button">테스트 전송</button>
+                  <button class="primary-action" type="submit">알림 저장</button>
+                </div>
+              </form>
+              <div class="wizard-result" id="alertChannelResult"></div>
             </article>
 
             <article class="panel settings-panel">
@@ -1126,7 +1202,7 @@ date</textarea>
       </form>
     </dialog>
 
-    <script type="module" src="./hardware3d.js?v=20260624-ops1"></script>
-    <script src="./app.js?v=20260624-ops1"></script>
+    <script type="module" src="./hardware3d.js?v=20260624-platform1"></script>
+    <script src="./app.js?v=20260624-platform1"></script>
   </body>
 </html>

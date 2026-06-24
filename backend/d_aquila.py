@@ -12,6 +12,7 @@ import urllib.parse
 import urllib.request
 import shutil
 import socket
+import urllib.error
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -97,6 +98,47 @@ class PrometheusConfigRequest(BaseModel):
     ipmi_targets: list[str] = Field(default_factory=list)
 
 
+class AccessModelRequest(BaseModel):
+    admin_users: list[str] = Field(default_factory=list)
+    operator_users: list[str] = Field(default_factory=list)
+    viewer_users: list[str] = Field(default_factory=list)
+    admin_groups: list[str] = Field(default_factory=list)
+    operator_groups: list[str] = Field(default_factory=list)
+    viewer_groups: list[str] = Field(default_factory=list)
+
+
+class JobTemplateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    partition: str = Field(min_length=1, max_length=80)
+    cpu: int = Field(ge=1, le=4096)
+    gpu: int = Field(ge=0, le=128)
+    memory: str = Field(min_length=1, max_length=32)
+    time: str = Field(min_length=1, max_length=32)
+    script: str = Field(min_length=1, max_length=20000)
+    requires_approval: bool = True
+
+
+class ApprovalRequest(BaseModel):
+    template_id: str = Field(min_length=1, max_length=80)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+
+class ApprovalDecisionRequest(BaseModel):
+    action: str = Field(min_length=1, max_length=20)
+    comment: str = Field(default="", max_length=500)
+
+
+class FacilityLayoutRequest(BaseModel):
+    rooms: list[dict[str, Any]] = Field(default_factory=list)
+    racks: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AlertChannelsRequest(BaseModel):
+    webhook_url: str = Field(default="", max_length=500)
+    email_recipients: list[str] = Field(default_factory=list)
+    enabled_events: list[str] = Field(default_factory=list)
+
+
 def default_policy() -> dict[str, Any]:
     return {
         "enabled": ENABLE_SUBMIT,
@@ -106,6 +148,51 @@ def default_policy() -> dict[str, Any]:
         "max_memory_gb": 256,
         "max_time_hours": 24,
         "allow_custom_script": True,
+    }
+
+
+def default_access_model() -> dict[str, Any]:
+    return {
+        "admin_users": ["root"],
+        "operator_users": [],
+        "viewer_users": [],
+        "admin_groups": ["root", "wheel"],
+        "operator_groups": [],
+        "viewer_groups": [],
+    }
+
+
+def default_templates() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "cpu-basic",
+            "name": "CPU 기본 작업",
+            "partition": "cpu",
+            "cpu": 4,
+            "gpu": 0,
+            "memory": "16G",
+            "time": "02:00:00",
+            "script": "#!/bin/bash\nhostname\ndate\n",
+            "requires_approval": True,
+        },
+        {
+            "id": "gpu-basic",
+            "name": "GPU 기본 작업",
+            "partition": "gpu",
+            "cpu": 8,
+            "gpu": 1,
+            "memory": "64G",
+            "time": "04:00:00",
+            "script": "#!/bin/bash\nnvidia-smi\nhostname\ndate\n",
+            "requires_approval": True,
+        },
+    ]
+
+
+def default_facility_layout() -> dict[str, Any]:
+    return {
+        "rooms": [{"id": "room-a", "name": "Data Hall A", "floor": "2F"}],
+        "racks": [{"id": "rack-a01", "name": "Rack A01", "room_id": "room-a", "units": 42, "pdu_watts": 6000}],
     }
 
 
@@ -120,6 +207,16 @@ def load_runtime_config() -> dict[str, Any]:
     return {
         "prometheus": {"url": PROMETHEUS_URL, **(data.get("prometheus") or {})},
         "job_policy": {**default_policy(), **(data.get("job_policy") or {})},
+        "access_model": {**default_access_model(), **(data.get("access_model") or {})},
+        "job_templates": data.get("job_templates") or default_templates(),
+        "approvals": data.get("approvals") or [],
+        "facility_layout": {**default_facility_layout(), **(data.get("facility_layout") or {})},
+        "alert_channels": {
+            "webhook_url": "",
+            "email_recipients": [],
+            "enabled_events": ["job.submit", "job.cancel", "node.down", "target.down"],
+            **(data.get("alert_channels") or {}),
+        },
     }
 
 
@@ -146,6 +243,90 @@ def audit(action: str, user: str | None = None, detail: dict[str, Any] | None = 
 
 
 RUNTIME_CONFIG = load_runtime_config()
+
+
+def user_groups(username: str | None) -> set[str]:
+    if not username:
+        return set()
+    try:
+        import grp
+        import pwd
+
+        primary_gid = pwd.getpwnam(username).pw_gid
+        groups = {grp.getgrgid(primary_gid).gr_name}
+        groups.update(group.gr_name for group in grp.getgrall() if username in group.gr_mem)
+        return groups
+    except Exception:
+        return set()
+
+
+def user_role(username: str | None) -> str:
+    model = RUNTIME_CONFIG.get("access_model") or default_access_model()
+    groups = user_groups(username)
+    if username in model.get("admin_users", []) or groups.intersection(model.get("admin_groups", [])):
+        return "admin"
+    if username in model.get("operator_users", []) or groups.intersection(model.get("operator_groups", [])):
+        return "operator"
+    if username in model.get("viewer_users", []) or groups.intersection(model.get("viewer_groups", [])):
+        return "viewer"
+    if AUTH_MODE == "disabled":
+        return "admin"
+    return "viewer"
+
+
+def require_role(username: str | None, allowed: set[str]) -> None:
+    role = user_role(username)
+    if role not in allowed:
+        raise HTTPException(status_code=403, detail=f"Role '{role}' is not allowed for this operation")
+
+
+def slug(value: str) -> str:
+    clean = re.sub(r"[^a-zA-Z0-9_.-]+", "-", value.strip().lower()).strip("-")
+    return clean or secrets.token_hex(4)
+
+
+def write_file_sd_config(config: dict[str, Any]) -> dict[str, Any]:
+    file_sd_dir = GENERATED_DIR / "prometheus" / "file_sd"
+    file_sd_dir.mkdir(parents=True, exist_ok=True)
+    jobs = {
+        "node-exporter": parse_target_lines(config.get("node_targets", [])),
+        "dcgm-exporter": parse_target_lines(config.get("dcgm_targets", [])),
+        "ipmi-exporter": parse_target_lines(config.get("ipmi_targets", [])),
+    }
+    written = {}
+    for job, targets in jobs.items():
+        payload = [{"labels": {"job": job}, "targets": targets}] if targets else []
+        path = file_sd_dir / f"{job}.json"
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        written[job] = str(path)
+    return written
+
+
+def reload_prometheus() -> dict[str, Any]:
+    url = f"{prometheus_base_url()}/-/reload"
+    req = urllib.request.Request(url, data=b"", method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=COMMAND_TIMEOUT) as response:
+            return {"ok": 200 <= response.status < 300, "status": response.status}
+    except urllib.error.HTTPError as exc:
+        return {"ok": False, "status": exc.code, "detail": exc.reason}
+    except Exception as exc:
+        return {"ok": False, "detail": str(exc)}
+
+
+def notify_event(event: str, payload: dict[str, Any]) -> None:
+    channels = RUNTIME_CONFIG.get("alert_channels") or {}
+    if event not in channels.get("enabled_events", []):
+        return
+    webhook_url = channels.get("webhook_url")
+    if not webhook_url:
+        return
+    body = json.dumps({"event": event, "payload": payload}, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(webhook_url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        urllib.request.urlopen(req, timeout=min(COMMAND_TIMEOUT, 5)).read()
+    except Exception:
+        pass
 
 
 def session_user(token: str | None) -> str | None:
@@ -229,6 +410,7 @@ def me(d_aquila_session: str | None = Cookie(default=None, alias=SESSION_COOKIE)
         "authenticated": bool(username),
         "username": username,
         "auth_mode": AUTH_MODE,
+        "role": user_role(username),
     }
 
 
@@ -1032,6 +1214,7 @@ def nodes() -> dict[str, Any]:
 @app.post("/api/jobs/submit")
 def submit_job(request: SubmitRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
+    require_role(user, {"admin", "operator"})
     enforce_submit_policy(request)
 
     with tempfile.NamedTemporaryFile("w", suffix=".sbatch", prefix="d-aquila-", delete=False) as handle:
@@ -1041,6 +1224,7 @@ def submit_job(request: SubmitRequest, username: str = Cookie(default=None, alia
     try:
         output = run_command(["sbatch", script_path])
         audit("job.submit", user, {"name": request.name, "partition": request.partition, "cpu": request.cpu, "gpu": request.gpu}, "ok")
+        notify_event("job.submit", {"user": user, "name": request.name, "partition": request.partition})
     finally:
         try:
             os.unlink(script_path)
@@ -1054,10 +1238,12 @@ def submit_job(request: SubmitRequest, username: str = Cookie(default=None, alia
 @app.post("/api/jobs/{job_id}/cancel")
 def cancel_job(job_id: str, request: JobCancelRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
+    require_role(user, {"admin", "operator"})
     if not re.match(r"^[A-Za-z0-9_.-]+$", job_id):
         raise HTTPException(status_code=400, detail="Invalid job id")
     output = run_command(["scancel", job_id])
     audit("job.cancel", user, {"job_id": job_id, "reason": request.reason}, "ok")
+    notify_event("job.cancel", {"user": user, "job_id": job_id, "reason": request.reason})
     return {"cancelled": True, "job_id": job_id, "output": output.strip()}
 
 
@@ -1069,6 +1255,7 @@ def get_job_policy() -> dict[str, Any]:
 @app.post("/api/job-policy")
 def set_job_policy(request: JobPolicyRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
+    require_role(user, {"admin"})
     policy = request.model_dump() if hasattr(request, "model_dump") else request.dict()
     policy["allowed_partitions"] = sorted(set(item.strip() for item in policy["allowed_partitions"] if item.strip()))
     RUNTIME_CONFIG["job_policy"] = policy
@@ -1086,6 +1273,7 @@ def get_prometheus_config() -> dict[str, Any]:
 @app.post("/api/prometheus/config")
 def set_prometheus_config(request: PrometheusConfigRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
+    require_role(user, {"admin", "operator"})
     config = {
         "url": request.url.rstrip("/"),
         "node_targets": parse_target_lines(request.node_targets),
@@ -1093,18 +1281,163 @@ def set_prometheus_config(request: PrometheusConfigRequest, username: str = Cook
         "ipmi_targets": parse_target_lines(request.ipmi_targets),
     }
     RUNTIME_CONFIG["prometheus"] = config
+    written = write_file_sd_config(config)
     save_runtime_config()
     result = prometheus_test(config["url"])
-    audit("prometheus.update", user, {**config, "test": result}, "ok" if result["ok"] else "warn")
-    return {"prometheus": config, "test": result}
+    audit("prometheus.update", user, {**config, "written": written, "test": result}, "ok" if result["ok"] else "warn")
+    return {"prometheus": config, "written": written, "test": result}
 
 
 @app.post("/api/prometheus/test")
 def test_prometheus_config(request: PrometheusConfigRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
+    require_role(user, {"admin", "operator"})
     result = prometheus_test(request.url)
     audit("prometheus.test", user, {"url": request.url, "result": result}, "ok" if result["ok"] else "warn")
     return {"test": result}
+
+
+@app.post("/api/prometheus/apply")
+def apply_prometheus_config(username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
+    user = session_user(username)
+    require_role(user, {"admin", "operator"})
+    config = RUNTIME_CONFIG.get("prometheus") or {"url": prometheus_base_url()}
+    written = write_file_sd_config(config)
+    reload_result = reload_prometheus()
+    status = "ok" if reload_result.get("ok") else "warn"
+    audit("prometheus.apply", user, {"written": written, "reload": reload_result}, status)
+    return {"written": written, "reload": reload_result}
+
+
+@app.get("/api/access-model")
+def get_access_model(username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
+    user = session_user(username)
+    return {"access_model": RUNTIME_CONFIG.get("access_model") or default_access_model(), "current_role": user_role(user)}
+
+
+@app.post("/api/access-model")
+def set_access_model(request: AccessModelRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
+    user = session_user(username)
+    require_role(user, {"admin"})
+    model = request.model_dump() if hasattr(request, "model_dump") else request.dict()
+    for key, value in list(model.items()):
+        model[key] = sorted(set(item.strip() for item in value if item.strip()))
+    RUNTIME_CONFIG["access_model"] = model
+    save_runtime_config()
+    audit("access.update", user, model, "ok")
+    return {"access_model": model}
+
+
+@app.get("/api/job-templates")
+def get_job_templates() -> dict[str, Any]:
+    return {"templates": RUNTIME_CONFIG.get("job_templates") or default_templates()}
+
+
+@app.post("/api/job-templates")
+def save_job_template(request: JobTemplateRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
+    user = session_user(username)
+    require_role(user, {"admin", "operator"})
+    template = request.model_dump() if hasattr(request, "model_dump") else request.dict()
+    template["id"] = slug(template["name"])
+    templates = [item for item in RUNTIME_CONFIG.get("job_templates", []) if item.get("id") != template["id"]]
+    templates.append(template)
+    RUNTIME_CONFIG["job_templates"] = sorted(templates, key=lambda item: item.get("name", ""))
+    save_runtime_config()
+    audit("template.save", user, {"template_id": template["id"], "name": template["name"]}, "ok")
+    return {"template": template, "templates": RUNTIME_CONFIG["job_templates"]}
+
+
+@app.get("/api/approvals")
+def get_approvals() -> dict[str, Any]:
+    return {"approvals": RUNTIME_CONFIG.get("approvals") or []}
+
+
+@app.post("/api/approvals")
+def request_approval(request: ApprovalRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
+    user = session_user(username)
+    template = next((item for item in RUNTIME_CONFIG.get("job_templates", []) if item.get("id") == request.template_id), None)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    approval = {
+        "id": secrets.token_hex(8),
+        "template_id": request.template_id,
+        "template_name": template.get("name"),
+        "requester": user,
+        "status": "pending",
+        "parameters": request.parameters,
+        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+    RUNTIME_CONFIG.setdefault("approvals", []).insert(0, approval)
+    save_runtime_config()
+    audit("approval.request", user, {"approval_id": approval["id"], "template_id": request.template_id}, "ok")
+    notify_event("approval.request", approval)
+    return {"approval": approval}
+
+
+@app.post("/api/approvals/{approval_id}/decision")
+def decide_approval(approval_id: str, request: ApprovalDecisionRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
+    user = session_user(username)
+    require_role(user, {"admin", "operator"})
+    if request.action not in {"approve", "reject"}:
+        raise HTTPException(status_code=400, detail="Action must be approve or reject")
+    approvals = RUNTIME_CONFIG.get("approvals") or []
+    approval = next((item for item in approvals if item.get("id") == approval_id), None)
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if approval.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="Approval is already decided")
+    approval["status"] = "approved" if request.action == "approve" else "rejected"
+    approval["reviewer"] = user
+    approval["comment"] = request.comment
+    approval["decided_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+    save_runtime_config()
+    audit("approval.decision", user, {"approval_id": approval_id, "action": request.action}, "ok")
+    notify_event("approval.decision", approval)
+    return {"approval": approval}
+
+
+@app.get("/api/facility-layout")
+def get_facility_layout() -> dict[str, Any]:
+    return {"facility_layout": RUNTIME_CONFIG.get("facility_layout") or default_facility_layout()}
+
+
+@app.post("/api/facility-layout")
+def set_facility_layout(request: FacilityLayoutRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
+    user = session_user(username)
+    require_role(user, {"admin", "operator"})
+    layout = request.model_dump() if hasattr(request, "model_dump") else request.dict()
+    RUNTIME_CONFIG["facility_layout"] = layout
+    save_runtime_config()
+    audit("facility.update", user, {"rooms": len(layout.get("rooms", [])), "racks": len(layout.get("racks", []))}, "ok")
+    return {"facility_layout": layout}
+
+
+@app.get("/api/alert-channels")
+def get_alert_channels() -> dict[str, Any]:
+    return {"alert_channels": RUNTIME_CONFIG.get("alert_channels") or {}}
+
+
+@app.post("/api/alert-channels")
+def set_alert_channels(request: AlertChannelsRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
+    user = session_user(username)
+    require_role(user, {"admin", "operator"})
+    channels = request.model_dump() if hasattr(request, "model_dump") else request.dict()
+    channels["email_recipients"] = sorted(set(item.strip() for item in channels.get("email_recipients", []) if item.strip()))
+    channels["enabled_events"] = sorted(set(item.strip() for item in channels.get("enabled_events", []) if item.strip()))
+    RUNTIME_CONFIG["alert_channels"] = channels
+    save_runtime_config()
+    audit("alerts.update", user, {"enabled_events": channels["enabled_events"], "webhook": bool(channels.get("webhook_url"))}, "ok")
+    return {"alert_channels": channels}
+
+
+@app.post("/api/alert-channels/test")
+def test_alert_channels(username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
+    user = session_user(username)
+    require_role(user, {"admin", "operator"})
+    payload = {"message": "D-aquila alert channel test", "user": user, "time": datetime.now().astimezone().isoformat(timespec="seconds")}
+    notify_event("alert.test", payload)
+    audit("alerts.test", user, payload, "ok")
+    return {"sent": True}
 
 
 app.mount("/", StaticFiles(directory=ROOT, html=True), name="static")

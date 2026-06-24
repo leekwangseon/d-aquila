@@ -12,6 +12,11 @@ let latestIpmi = null;
 let latestAudit = null;
 let latestJobPolicy = null;
 let latestPrometheusConfig = null;
+let latestAccessModel = null;
+let latestTemplates = [];
+let latestApprovals = [];
+let latestFacilityLayout = null;
+let latestAlertChannels = null;
 let loadHistory = [];
 let powerHistory = [];
 let graphHistory = [];
@@ -1477,6 +1482,91 @@ function renderAuditLogs(data = {}) {
     : `<div class="empty-inline"><strong>감사 로그 없음</strong><span>로그인, 제출, 취소, 정책 변경 시 기록됩니다.</span></div>`;
 }
 
+function csvValue(selector) {
+  return String(document.querySelector(selector)?.value || "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function setCsv(selector, items = []) {
+  const element = document.querySelector(selector);
+  if (element && document.activeElement !== element) element.value = (items || []).join(",");
+}
+
+function renderAccessModel(data = {}) {
+  const model = data.access_model || {};
+  latestAccessModel = model;
+  setText("#currentRoleBadge", data.current_role ? `현재 ${data.current_role}` : "Role");
+  setCsv("#accessAdminUsers", model.admin_users);
+  setCsv("#accessOperatorUsers", model.operator_users);
+  setCsv("#accessViewerUsers", model.viewer_users);
+  setCsv("#accessAdminGroups", model.admin_groups);
+  setCsv("#accessOperatorGroups", model.operator_groups);
+  setCsv("#accessViewerGroups", model.viewer_groups);
+}
+
+function renderTemplates(data = {}) {
+  latestTemplates = data.templates || [];
+  const target = document.querySelector("#templateList");
+  if (!target) return;
+  target.innerHTML = latestTemplates.length
+    ? latestTemplates.map((item) => `
+        <div class="ops-row">
+          <div>
+            <strong>${escapeHtml(item.name)}</strong>
+            <small>${escapeHtml(item.partition)} · CPU ${escapeHtml(item.cpu)} · GPU ${escapeHtml(item.gpu)} · ${escapeHtml(item.time)}</small>
+          </div>
+          <button class="ghost-action request-template" type="button" data-template-id="${escapeHtml(item.id)}">승인 요청</button>
+        </div>
+      `).join("")
+    : `<div class="empty-inline"><strong>템플릿 없음</strong><span>반복 작업 템플릿을 저장하면 표시됩니다.</span></div>`;
+}
+
+function renderApprovals(data = {}) {
+  latestApprovals = data.approvals || [];
+  const target = document.querySelector("#approvalList");
+  if (!target) return;
+  const pending = latestApprovals.slice(0, 10);
+  target.innerHTML = pending.length
+    ? pending.map((item) => `
+        <div class="ops-row ${item.status}">
+          <div>
+            <strong>${escapeHtml(item.template_name || item.template_id)}</strong>
+            <small>${escapeHtml(item.requester || "-")} · ${escapeHtml(item.status)} · ${escapeHtml(formatDateShort(item.created_at))}</small>
+          </div>
+          ${item.status === "pending" ? `
+            <button class="ghost-action approval-decision" type="button" data-approval-id="${escapeHtml(item.id)}" data-action="reject">반려</button>
+            <button class="primary-action approval-decision" type="button" data-approval-id="${escapeHtml(item.id)}" data-action="approve">승인</button>
+          ` : ""}
+        </div>
+      `).join("")
+    : `<div class="empty-inline"><strong>승인 요청 없음</strong><span>템플릿 승인 요청이 들어오면 표시됩니다.</span></div>`;
+}
+
+function renderFacilityLayout(data = {}) {
+  const layout = data.facility_layout || {};
+  latestFacilityLayout = layout;
+  const roomsInput = document.querySelector("#facilityRooms");
+  const racksInput = document.querySelector("#facilityRacks");
+  if (roomsInput && document.activeElement !== roomsInput) roomsInput.value = JSON.stringify(layout.rooms || [], null, 2);
+  if (racksInput && document.activeElement !== racksInput) racksInput.value = JSON.stringify(layout.racks || [], null, 2);
+  const target = document.querySelector("#facilitySummary");
+  if (target) {
+    target.innerHTML = `
+      <div class="ops-row">
+        <div><strong>${(layout.rooms || []).length} rooms</strong><small>${(layout.racks || []).length} racks configured</small></div>
+      </div>
+    `;
+  }
+}
+
+function renderAlertChannels(data = {}) {
+  const channels = data.alert_channels || {};
+  latestAlertChannels = channels;
+  const webhook = document.querySelector("#alertWebhookUrl");
+  if (webhook && document.activeElement !== webhook) webhook.value = channels.webhook_url || "";
+  setCsv("#alertEmails", channels.email_recipients || []);
+  setCsv("#alertEvents", channels.enabled_events || []);
+}
+
 function updateMetrics(summary, system) {
   const systemCpu = Number(system?.cpu?.usage_percent);
   const slurmCpu = Number(summary?.cpu_usage_percent);
@@ -1573,7 +1663,7 @@ ${body}`;
 }
 
 async function refreshData() {
-  const [summary, system, nodeData, jobData, targetData, discoveryData, logData, ipmiData, auditData, policyData, promConfigData] = await Promise.all([
+  const [summary, system, nodeData, jobData, targetData, discoveryData, logData, ipmiData, auditData, policyData, promConfigData, accessData, templateData, approvalData, facilityData, alertData] = await Promise.all([
     loadOptional("/api/summary", {}),
     loadOptional("/api/system", {}),
     loadOptional("/api/nodes", { nodes: [] }),
@@ -1584,7 +1674,12 @@ async function refreshData() {
     loadOptional("/api/ipmi", { targets: [], sensors: [], inlet_temperatures: [], power_readings: [], summary: {} }),
     loadOptional("/api/audit?limit=120", { audit: [], summary: {} }),
     loadOptional("/api/job-policy", { policy: {} }),
-    loadOptional("/api/prometheus/config", { prometheus: {} })
+    loadOptional("/api/prometheus/config", { prometheus: {} }),
+    loadOptional("/api/access-model", { access_model: {}, current_role: "" }),
+    loadOptional("/api/job-templates", { templates: [] }),
+    loadOptional("/api/approvals", { approvals: [] }),
+    loadOptional("/api/facility-layout", { facility_layout: {} }),
+    loadOptional("/api/alert-channels", { alert_channels: {} })
   ]);
 
   latestSummary = summary.unavailable ? null : summary;
@@ -1609,6 +1704,11 @@ async function refreshData() {
   renderAuditLogs(latestAudit);
   renderJobPolicy(policyData.policy || latestDiscovery?.job_policy || {});
   renderPrometheusWizard(promConfigData.prometheus || latestDiscovery?.prometheus || {});
+  renderAccessModel(accessData);
+  renderTemplates(templateData);
+  renderApprovals(approvalData);
+  renderFacilityLayout(facilityData);
+  renderAlertChannels(alertData);
 
   const connected = !summary.unavailable || !system.unavailable || !nodeData.unavailable || !jobData.unavailable || !targetData.unavailable || !discoveryData.unavailable || !logData.unavailable || !ipmiData.unavailable;
   setApiState(connected ? "Live API" : "No API", connected);
@@ -1731,6 +1831,16 @@ document.querySelector("#testPrometheusWizard")?.addEventListener("click", async
   }
 });
 
+document.querySelector("#applyPrometheusWizard")?.addEventListener("click", async () => {
+  try {
+    const result = await apiPost("/api/prometheus/apply", {});
+    showPrometheusWizardResult({ test: result.reload || {} });
+    await refreshData();
+  } catch (error) {
+    alert(`Prometheus 반영 실패: ${error.message}`);
+  }
+});
+
 document.querySelector("#prometheusWizardForm")?.addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
@@ -1739,6 +1849,108 @@ document.querySelector("#prometheusWizardForm")?.addEventListener("submit", asyn
     await refreshData();
   } catch (error) {
     alert(`Prometheus 설정 저장 실패: ${error.message}`);
+  }
+});
+
+document.querySelector("#accessModelForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = {
+    admin_users: csvValue("#accessAdminUsers"),
+    operator_users: csvValue("#accessOperatorUsers"),
+    viewer_users: csvValue("#accessViewerUsers"),
+    admin_groups: csvValue("#accessAdminGroups"),
+    operator_groups: csvValue("#accessOperatorGroups"),
+    viewer_groups: csvValue("#accessViewerGroups")
+  };
+  try {
+    const result = await apiPost("/api/access-model", payload);
+    renderAccessModel(result);
+  } catch (error) {
+    alert(`권한 저장 실패: ${error.message}`);
+  }
+});
+
+document.querySelector("#templateForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = {
+    name: document.querySelector("#templateName")?.value || "",
+    partition: document.querySelector("#templatePartition")?.value || "",
+    cpu: Number(document.querySelector("#templateCpu")?.value || 1),
+    gpu: Number(document.querySelector("#templateGpu")?.value || 0),
+    memory: document.querySelector("#templateMemory")?.value || "16G",
+    time: document.querySelector("#templateTime")?.value || "01:00:00",
+    script: document.querySelector("#templateScript")?.value || "#!/bin/bash\nhostname\n",
+    requires_approval: !!document.querySelector("#templateRequiresApproval")?.checked
+  };
+  try {
+    const result = await apiPost("/api/job-templates", payload);
+    renderTemplates(result);
+  } catch (error) {
+    alert(`템플릿 저장 실패: ${error.message}`);
+  }
+});
+
+document.querySelector("#templateList")?.addEventListener("click", async (event) => {
+  const button = event.target.closest(".request-template");
+  if (!button) return;
+  try {
+    await apiPost("/api/approvals", { template_id: button.dataset.templateId, parameters: {} });
+    await refreshData();
+  } catch (error) {
+    alert(`승인 요청 실패: ${error.message}`);
+  }
+});
+
+document.querySelector("#approvalList")?.addEventListener("click", async (event) => {
+  const button = event.target.closest(".approval-decision");
+  if (!button) return;
+  try {
+    await apiPost(`/api/approvals/${encodeURIComponent(button.dataset.approvalId)}/decision`, {
+      action: button.dataset.action,
+      comment: ""
+    });
+    await refreshData();
+  } catch (error) {
+    alert(`승인 처리 실패: ${error.message}`);
+  }
+});
+
+document.querySelector("#facilityForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const payload = {
+      rooms: JSON.parse(document.querySelector("#facilityRooms")?.value || "[]"),
+      racks: JSON.parse(document.querySelector("#facilityRacks")?.value || "[]")
+    };
+    const result = await apiPost("/api/facility-layout", payload);
+    renderFacilityLayout(result);
+  } catch (error) {
+    alert(`배치 저장 실패: ${error.message}`);
+  }
+});
+
+document.querySelector("#alertChannelForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = {
+    webhook_url: document.querySelector("#alertWebhookUrl")?.value || "",
+    email_recipients: csvValue("#alertEmails"),
+    enabled_events: csvValue("#alertEvents")
+  };
+  try {
+    const result = await apiPost("/api/alert-channels", payload);
+    renderAlertChannels(result);
+  } catch (error) {
+    alert(`알림 저장 실패: ${error.message}`);
+  }
+});
+
+document.querySelector("#testAlertChannel")?.addEventListener("click", async () => {
+  try {
+    await apiPost("/api/alert-channels/test", {});
+    const target = document.querySelector("#alertChannelResult");
+    if (target) target.innerHTML = `<div class="check-row ok"><span></span><div><strong>테스트 전송 요청 완료</strong><small>Webhook URL과 이벤트 설정을 확인하세요.</small></div></div>`;
+  } catch (error) {
+    alert(`알림 테스트 실패: ${error.message}`);
   }
 });
 
