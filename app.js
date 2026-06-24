@@ -822,7 +822,13 @@ function renderOverviewInsights(summary, system) {
   const pending = Number(summary?.jobs_pending ?? 0);
   const downTargets = latestTargets.filter((target) => target.health !== "up").length;
   const downNodes = latestNodes.filter((node) => node.state.toLowerCase().includes("down")).length;
-  const slurmConnected = latestNodes.length > 0 || jobs.length > 0;
+  const slurmTargetCount = Number(latestDiscovery?.prometheus?.targets_by_job?.["slurm-exporter"] || 0);
+  const slurmMetrics = ["cpu_total", "cpu_alloc", "jobs_running", "jobs_pending", "nodes_down"]
+    .some((key) => Number(summary?.[key] || 0) > 0);
+  const slurmCommands = latestDiscovery?.commands || {};
+  const slurmClientDetected = ["sinfo", "squeue", "scontrol"].some((name) => !!slurmCommands[name]);
+  const slurmConfigDetected = (latestDiscovery?.slurm_config_paths || []).length > 0;
+  const slurmConnected = latestNodes.length > 0 || jobs.length > 0 || slurmTargetCount > 0 || slurmMetrics || (slurmClientDetected && slurmConfigDetected);
   const prometheusConnected = latestTargets.length > 0 || !!summary;
   const connected = !!system || !!summary;
   const risks = downTargets + downNodes + (disk >= 90 ? 1 : 0) + (memory >= 90 ? 1 : 0);
