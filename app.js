@@ -1301,7 +1301,7 @@ function renderSettings(discovery) {
   const mungeOk = (discovery?.munge_sockets || []).length > 0;
   const promReady = !!discovery?.prometheus?.ready;
   const auth = discovery?.auth || {};
-  const pamOk = auth.mode !== "pam" || !!auth.pam_available;
+  const pamOk = auth.mode !== "pam" || !!auth.pam_available || !!auth.shadow_fallback_available;
   const submitEnabled = !!discovery?.submit_enabled;
   const targetCounts = discovery?.prometheus?.targets_by_job || {};
 
@@ -1312,7 +1312,7 @@ function renderSettings(discovery) {
   setText("#settingsPromMetric", promReady ? "OK" : "미연결");
   setText("#settingsPromDetail", discovery?.prometheus?.url || "Prometheus URL 없음");
   setText("#settingsAuthMetric", auth.mode === "disabled" ? "Disabled" : okText(pamOk));
-  setText("#settingsAuthDetail", `${auth.mode || "-"} · ${auth.session_seconds || "-"}s`);
+  setText("#settingsAuthDetail", `${auth.mode || "-"} · shadow ${auth.shadow_fallback_available ? "ready" : "off"} · ${auth.session_seconds || "-"}s`);
   setText("#settingsSubmitMetric", submitEnabled ? "Enabled" : "Disabled");
 
   const checks = [
@@ -1320,7 +1320,7 @@ function renderSettings(discovery) {
     [slurmConfigOk ? "ok" : "warn", "Slurm config", slurmConfigOk ? discovery.slurm_config_paths.join(", ") : "/etc/slurm 또는 /etc/slurm-llnl 마운트를 확인하세요."],
     [mungeOk ? "ok" : "warn", "Munge socket", mungeOk ? discovery.munge_sockets.join(", ") : "/run/munge 또는 /var/run/munge 마운트를 확인하세요."],
     [promReady ? "ok" : "warn", "Prometheus", promReady ? `${discovery.prometheus.url} 응답 확인` : `${discovery?.prometheus?.url || "Prometheus"} 연결 실패`],
-    [pamOk ? "ok" : "warn", "OS account login", auth.mode === "disabled" ? "개발 모드: 인증이 비활성화되어 있습니다." : pamOk ? "PAM 인증 모듈을 사용할 수 있습니다." : "pamela/PAM 런타임 또는 호스트 계정 마운트를 확인하세요."],
+    [pamOk ? "ok" : "warn", "OS account login", auth.mode === "disabled" ? "개발 모드: 인증이 비활성화되어 있습니다." : auth.pam_available ? "PAM 인증 모듈을 사용할 수 있습니다." : auth.shadow_fallback_available ? "PAM 실패 시 로컬 shadow 계정 검증을 사용할 수 있습니다." : "pamela/PAM 런타임 또는 호스트 계정 마운트를 확인하세요."],
     [submitEnabled ? "warn" : "ok", "Job submission", submitEnabled ? "작업 제출이 켜져 있습니다. 정책 제한을 확인하세요." : "작업 제출은 비활성화되어 있습니다."]
   ];
   const checkList = document.querySelector("#connectionChecks");

@@ -151,6 +151,20 @@ D_AQUILA_AUTH_MODE=pam
 
 사용자는 현재 서버의 Linux 계정과 비밀번호로 로그인합니다.
 
+Docker 컨테이너 안에서 호스트 PAM 모듈을 그대로 사용할 수 없는 환경이 있습니다. 예를 들어 Rocky/RHEL 계열 호스트의 PAM stack이 `pam_sss`, `pam_faillock` 같은 모듈을 요구하지만 Python slim 컨테이너에 해당 모듈이 없으면 비밀번호가 맞아도 PAM 인증이 실패할 수 있습니다.
+
+D-aquila는 이런 경우를 위해 기본적으로 로컬 계정에 한해 `/etc/shadow` 해시 검증 fallback을 사용합니다.
+
+```text
+D_AQUILA_AUTH_SHADOW_FALLBACK=true
+```
+
+이 fallback은 `/etc/shadow`에 존재하는 로컬 계정에만 동작합니다. LDAP, AD, SSSD 기반 중앙 계정은 별도 인증 연동을 추가하는 것이 권장됩니다. 보안 정책상 shadow fallback을 끄려면 다음 값을 사용합니다.
+
+```bash
+export D_AQUILA_AUTH_SHADOW_FALLBACK=false
+```
+
 개발 중 인증을 끄고 싶을 때만 다음 값을 사용할 수 있습니다.
 
 ```bash

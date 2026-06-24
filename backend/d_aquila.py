@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hmac
 import os
 import platform
 import re
@@ -33,6 +34,7 @@ PROMETHEUS_URL = os.getenv("D_AQUILA_PROMETHEUS_URL", "http://localhost:9090").r
 ENABLE_SUBMIT = os.getenv("D_AQUILA_ENABLE_SUBMIT", "false").lower() in {"1", "true", "yes", "on"}
 COMMAND_TIMEOUT = int(os.getenv("D_AQUILA_COMMAND_TIMEOUT", "10"))
 AUTH_MODE = os.getenv("D_AQUILA_AUTH_MODE", "pam").lower()
+AUTH_SHADOW_FALLBACK = os.getenv("D_AQUILA_AUTH_SHADOW_FALLBACK", "true").lower() in {"1", "true", "yes", "on"}
 AUTH_SESSION_SECONDS = int(os.getenv("D_AQUILA_AUTH_SESSION_SECONDS", "28800"))
 SESSION_COOKIE = "d_aquila_session"
 SESSIONS: dict[str, dict[str, Any]] = {}
@@ -358,11 +360,38 @@ def authenticate_os_user(username: str, password: str) -> None:
     try:
         import pamela
     except ImportError as exc:
+        if AUTH_SHADOW_FALLBACK and authenticate_shadow_user(username, password):
+            return
         raise HTTPException(status_code=503, detail="PAM authentication is not available in this runtime") from exc
     try:
         pamela.authenticate(username, password)
     except Exception as exc:
+        if AUTH_SHADOW_FALLBACK and authenticate_shadow_user(username, password):
+            return
         raise HTTPException(status_code=401, detail="Invalid OS username or password") from exc
+
+
+def authenticate_shadow_user(username: str, password: str) -> bool:
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", username):
+        return False
+    try:
+        import crypt
+        import pwd
+        import spwd
+    except ImportError:
+        return False
+    try:
+        pwd.getpwnam(username)
+        shadow_hash = spwd.getspnam(username).sp_pwdp
+    except Exception:
+        return False
+    if not shadow_hash or shadow_hash[0] in {"!", "*"}:
+        return False
+    try:
+        checked = crypt.crypt(password, shadow_hash)
+    except Exception:
+        return False
+    return bool(checked) and hmac.compare_digest(checked, shadow_hash)
 
 
 def pam_available() -> bool:
@@ -371,6 +400,17 @@ def pam_available() -> bool:
     except ImportError:
         return False
     return True
+
+
+def shadow_fallback_available() -> bool:
+    if not AUTH_SHADOW_FALLBACK:
+        return False
+    try:
+        import crypt  # noqa: F401
+        import spwd  # noqa: F401
+    except ImportError:
+        return False
+    return os.access("/etc/shadow", os.R_OK)
 
 
 @app.post("/api/auth/login")
@@ -913,6 +953,8 @@ def discovery() -> dict[str, Any]:
         "auth": {
             "mode": AUTH_MODE,
             "pam_available": pam_available(),
+            "shadow_fallback_enabled": AUTH_SHADOW_FALLBACK,
+            "shadow_fallback_available": shadow_fallback_available(),
             "session_seconds": AUTH_SESSION_SECONDS,
         },
         "runtime": {
