@@ -421,6 +421,80 @@ function renderNodeCardsGrouped() {
     }).join("");
 }
 
+function renderNodeCardsGrouped() {
+  const nodeCardList = document.querySelector("#nodeCardList");
+  const nodes = latestNodes || [];
+  if (!nodeCardList) return;
+  if (!nodes.length) {
+    renderEmptyInline("#nodeCardList", "노드 상세 없음", "Slurm scontrol show node가 연결되면 노드 카드가 표시됩니다.");
+    return;
+  }
+  const grouped = nodes
+    .slice()
+    .sort((a, b) => nodeNumber(a) - nodeNumber(b) || String(a.name || "").localeCompare(String(b.name || "")))
+    .reduce((acc, node) => {
+      const type = nodeFarmType(node);
+      if (!acc[type]) acc[type] = [];
+      acc[type].push(node);
+      return acc;
+    }, {});
+  nodeCardList.innerHTML = ["login", "cpu", "gpu", "other"]
+    .filter((type) => grouped[type]?.length)
+    .map((type) => {
+      const group = grouped[type];
+      const meta = nodeGroupMeta(type);
+      const groupCpuAlloc = group.reduce((sum, node) => sum + Number(node.cpu_alloc || 0), 0);
+      const groupCpuTotal = group.reduce((sum, node) => sum + Number(node.cpu_total || 0), 0);
+      const groupGpuAlloc = group.reduce((sum, node) => sum + Number(node.gpu_alloc || 0), 0);
+      const groupGpuTotal = group.reduce((sum, node) => sum + Number(node.gpu_total || 0), 0);
+      const groupAttention = group.filter((node) => ["warn", "down"].includes(nodeHealthType(node))).length;
+      return `
+        <section class="node-farm ${meta.className}">
+          <div class="node-farm-header">
+            <div><strong>${meta.title}</strong><span>${meta.subtitle}</span></div>
+            <div class="node-farm-stats">
+              <b>${group.length} nodes</b>
+              <b>CPU ${groupCpuAlloc}/${groupCpuTotal}</b>
+              ${groupGpuTotal ? `<b>GPU ${groupGpuAlloc}/${groupGpuTotal}</b>` : ""}
+              ${groupAttention ? `<b class="warn">${groupAttention} attention</b>` : ""}
+            </div>
+          </div>
+          <div class="node-farm-grid">
+            ${group.map((node) => {
+              const farm = nodeFarmType(node);
+              const health = nodeHealthType(node);
+              const nodeCpuPct = Number.isFinite(Number(node.cpu_usage_percent)) ? Math.round(Number(node.cpu_usage_percent)) : nodeUsagePercent(node.cpu_alloc, node.cpu_total);
+              const nodeMemPct = Number.isFinite(Number(node.memory_usage_percent)) ? Math.round(Number(node.memory_usage_percent)) : null;
+              const nodeGpuPct = nodeUsagePercent(node.gpu_alloc, node.gpu_total);
+              const partitionList = String(node.partitions || "").split(",").filter(Boolean);
+              const partitions = partitionList.slice(0, 3);
+              const extraPartitions = Math.max(0, partitionList.length - partitions.length);
+              const gres = node.gres && node.gres !== "(null)" ? node.gres : "-";
+              const cpuLabel = farm === "login" && Number.isFinite(Number(node.cpu_usage_percent))
+                ? `avg ${nodeCpuPct}%`
+                : `${node.cpu_alloc || 0}/${node.cpu_total || 0} · ${nodeCpuPct}%`;
+              return `
+                <article class="node-card ${health} ${farm}">
+                  <div class="node-card-head"><strong title="${escapeHtml(node.name || "-")}">${escapeHtml(node.name || "-")}</strong><b>${escapeHtml(node.state || "unknown")}</b></div>
+                  <div class="node-type-line"><span>${farm === "gpu" ? "GPU node" : farm === "cpu" ? "CPU node" : "Login node"}</span><em>${escapeHtml(gres)}</em></div>
+                  <div class="node-card-bars">
+                    <span>CPU <em>${cpuLabel}</em></span>
+                    <div class="mini-bar"><i style="width: ${nodeCpuPct}%"></i></div>
+                    ${nodeMemPct !== null ? `<span>Memory <em>avg ${nodeMemPct}%</em></span><div class="mini-bar memory-mini"><i style="width: ${nodeMemPct}%"></i></div>` : ""}
+                    <span>GPU <em>${node.gpu_alloc || 0}/${node.gpu_total || 0}${Number(node.gpu_total || 0) ? ` · ${nodeGpuPct}%` : ""}</em></span>
+                    <div class="mini-bar gpu-mini"><i style="width: ${nodeGpuPct}%"></i></div>
+                  </div>
+                  <div class="node-partitions">
+                    ${partitions.map((partition) => `<span>${escapeHtml(partition)}</span>`).join("")}
+                    ${extraPartitions ? `<span>+${extraPartitions}</span>` : ""}
+                  </div>
+                </article>`;
+            }).join("")}
+          </div>
+        </section>`;
+    }).join("");
+}
+
 function statusLabel(status) {
   const normalized = String(status || "").toLowerCase();
   const cls = normalized.includes("run") || normalized === "r" ? "running" : normalized.includes("pend") || normalized === "pd" ? "pending" : normalized.includes("fail") ? "failed" : "completed";
@@ -955,7 +1029,7 @@ function renderFilesystems(filesystems = []) {
       return `
         <div class="fs-row" title="${escapeHtml(`${fs.device} ${fs.fstype}`)}">
           <div class="fs-meta">
-            <strong>${escapeHtml(fs.mountpoint || "-")}</strong>
+            <strong>${escapeHtml(fs.label ? `${fs.label} (${fs.mountpoint || "-"})` : (fs.mountpoint || "-"))}</strong>
             <span>${formatBytes(fs.used_bytes)} / ${formatBytes(fs.total_bytes)}</span>
           </div>
           <div class="mini-bar"><i style="width: ${Math.max(0, Math.min(100, percent))}%"></i></div>
@@ -975,7 +1049,7 @@ function usageLevel(value) {
 }
 
 function renderOverviewInsights(summary, system) {
-  const cpu = Number(system?.cpu?.usage_percent ?? summary?.cpu_usage_percent);
+  const cpu = Number(summary?.cluster_cpu_usage_percent ?? summary?.cpu_usage_percent ?? system?.cpu?.usage_percent);
   const memory = Number(system?.memory?.usage_percent);
   const disk = Number(system?.disk?.usage_percent);
   const gpu = Number(summary?.gpu_usage_percent);
@@ -1218,6 +1292,46 @@ function renderNodeDotMatrix() {
   }).join("");
 }
 
+function renderNodeDotMatrix() {
+  const container = document.querySelector("#nodeDotMatrix");
+  if (!container) return;
+  if (!latestNodes.length) {
+    renderEmptyInline("#nodeDotMatrix", "노드 데이터 없음", "Slurm 노드가 연결되면 상태 도트가 표시됩니다.");
+    return;
+  }
+  const groups = ["login", "cpu", "gpu", "other"]
+    .map((type) => ({ type, meta: nodeGroupMeta(type), nodes: latestNodes.filter((node) => nodeFarmType(node) === type) }))
+    .filter((group) => group.nodes.length);
+  container.innerHTML = `
+    <div class="dot-explainer">
+      <strong>노드 1개 = 점 1개</strong>
+      <span>색상은 상태, 숫자는 CPU 사용률입니다. GPU 노드는 GPU 사용률도 함께 확인합니다.</span>
+    </div>
+    ${groups.map((group) => `
+      <div class="dot-group ${group.type}">
+        <div class="dot-group-title">
+          <strong>${group.meta.title}</strong>
+          <span>${group.nodes.length} nodes</span>
+        </div>
+        <div class="dot-grid">
+          ${group.nodes
+            .slice()
+            .sort((a, b) => nodeNumber(a) - nodeNumber(b) || String(a.name || "").localeCompare(String(b.name || "")))
+            .map((node) => {
+              const type = nodeHealthType(node);
+              const cpuPct = Number.isFinite(Number(node.cpu_usage_percent))
+                ? Math.round(Number(node.cpu_usage_percent))
+                : nodeUsagePercent(node.cpu_alloc, node.cpu_total);
+              const gpuPct = nodeUsagePercent(node.gpu_alloc, node.gpu_total);
+              const label = String(node.name || "-").replace(/^node/, "n").replace(/^login/, "L");
+              return `<span class="node-dot ${type}" style="--load:${Math.max(18, Math.min(100, cpuPct))}%" title="${escapeHtml(node.name || "-")} · ${escapeHtml(node.state || "-")} · CPU ${cpuPct}%${Number(node.gpu_total || 0) ? ` · GPU ${gpuPct}%` : ""}">${escapeHtml(label)}</span>`;
+            }).join("")}
+        </div>
+      </div>
+    `).join("")}
+  `;
+}
+
 function renderResourceHeatmap(values) {
   const container = document.querySelector("#resourceHeatmap");
   if (!container) return;
@@ -1291,7 +1405,7 @@ function renderPowerPulseGraph(summary, system) {
 }
 
 function renderGraphBoard(summary, system) {
-  const cpu = Number(system?.cpu?.usage_percent ?? summary?.cpu_usage_percent);
+  const cpu = Number(summary?.cluster_cpu_usage_percent ?? summary?.cpu_usage_percent ?? system?.cpu?.usage_percent);
   const memory = Number(system?.memory?.usage_percent);
   const disk = Number(system?.disk?.usage_percent);
   const gpu = Number(summary?.gpu_usage_percent || 0);
@@ -1766,10 +1880,27 @@ function renderAlertChannels(data = {}) {
   setCsv("#alertEvents", channels.enabled_events || []);
 }
 
+function ensureLocationMetric(system) {
+  const grid = document.querySelector('.status-grid[aria-label="Operations summary"]');
+  if (!grid) return;
+  if (!document.querySelector("#locationMetric")) {
+    const card = document.createElement("article");
+    card.className = "metric location-metric";
+    card.innerHTML = `
+      <span class="metric-label">현재 위치</span>
+      <strong id="locationMetric">-</strong>
+      <small id="locationDetailMetric">master node</small>
+    `;
+    grid.appendChild(card);
+  }
+  setText("#locationMetric", system?.hostname || "-");
+  setText("#locationDetailMetric", [system?.ip_address, "D-aquila API"].filter(Boolean).join(" · ") || "master node");
+}
+
 function updateMetrics(summary, system) {
   const systemCpu = Number(system?.cpu?.usage_percent);
-  const slurmCpu = Number(summary?.cpu_usage_percent);
-  const cpu = Number.isFinite(systemCpu) ? systemCpu : slurmCpu;
+  const clusterCpu = Number(summary?.cluster_cpu_usage_percent ?? summary?.cpu_usage_percent);
+  const cpu = Number.isFinite(clusterCpu) ? clusterCpu : systemCpu;
   const gpu = Number(summary?.gpu_usage_percent ?? 0);
   const temp = Number(summary?.max_gpu_temp_celsius ?? 0);
   const power = Number(summary?.gpu_power_watts ?? 0);
@@ -1778,6 +1909,8 @@ function updateMetrics(summary, system) {
   const netRate = Number(system?.network?.rx_bytes_per_sec ?? 0) + Number(system?.network?.tx_bytes_per_sec ?? 0);
   const logicalCores = Number(system?.cpu?.logical_count || 0);
   const physicalCores = Number(system?.cpu?.physical_count || 0);
+  const clusterCores = Number(summary?.cluster_core_total || summary?.cpu_total || 0);
+  const clusterGpus = Number(summary?.gpu_total || 0);
   const load1 = Number(system?.cpu?.load1 || 0);
   const load5 = Number(system?.cpu?.load5 || 0);
   const load15 = Number(system?.cpu?.load15 || 0);
@@ -1800,8 +1933,9 @@ function updateMetrics(summary, system) {
   setText("#hostMetric", system?.hostname || "local server");
   setText("#uptimeMetric", system?.uptime_human || "-");
   setText("#bootShortMetric", system?.boot_time ? `boot ${formatDateShort(system.boot_time)}` : "boot time");
-  setText("#coresMetric", logicalCores ? `${logicalCores}` : "-");
-  setText("#coresDetailMetric", physicalCores ? `${physicalCores} physical` : "logical cores");
+  ensureLocationMetric(system);
+  setText("#coresMetric", clusterCores ? `${Math.round(clusterCores)}` : "-");
+  setText("#coresDetailMetric", clusterGpus ? `${Math.round(clusterGpus)} GPUs · cluster total` : "cluster CPU cores");
   setText("#cpuMetricDetail", formatPercent(cpu));
   setText("#cpuDetail", system?.cpu ? `${system.cpu.logical_count} logical / ${system.cpu.physical_count || "-"} physical` : "logical cores");
   setText("#memMetricDetail", Number.isFinite(system?.memory?.usage_percent) ? `${Math.round(system.memory.usage_percent)}%` : "N/A");

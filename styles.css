@@ -1886,6 +1886,80 @@ h2 {
   background: var(--gpu);
 }
 
+.memory-mini i {
+  background: var(--ok);
+}
+
+.dot-explainer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dot-explainer strong {
+  color: var(--ink);
+}
+
+.dot-group {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.dot-group-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.dot-group-title strong {
+  color: var(--ink);
+}
+
+.dot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+  gap: 7px;
+}
+
+.node-dot {
+  min-width: 0;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: white;
+  background: linear-gradient(90deg, var(--dot-color) var(--load), rgba(124, 141, 156, 0.28) var(--load));
+  border: 1px solid rgba(22, 34, 46, 0.16);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.node-dot.idle {
+  --dot-color: #8aa0b2;
+}
+
+.node-dot.busy {
+  --dot-color: var(--ok);
+}
+
+.node-dot.warn {
+  --dot-color: var(--amber);
+}
+
+.node-dot.down {
+  --dot-color: var(--rose);
+}
+
 .power-status-grid .metric:nth-child(1)::before {
   background: var(--ok);
 }

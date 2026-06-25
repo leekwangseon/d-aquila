@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hmac
+import math
 import os
 import platform
 import re
@@ -559,7 +560,8 @@ def prom_value(query: str, default: float = 0.0) -> float:
         result = data.get("result", [])
         if not result:
             return default
-        return float(result[0]["value"][1])
+        value = float(result[0]["value"][1])
+        return value if math.isfinite(value) else default
     except HTTPException:
         return default
     except (KeyError, ValueError, TypeError):
@@ -583,29 +585,44 @@ def human_duration(seconds: float) -> str:
 
 
 def read_filesystems() -> list[dict[str, Any]]:
-    seen: set[str] = set()
     filesystems: list[dict[str, Any]] = []
-    for partition in psutil.disk_partitions(all=False):
-        mountpoint = partition.mountpoint
-        if mountpoint in seen:
+    host_paths = [
+        ("root", "/host"),
+        ("home", "/host/home"),
+        ("data", "/host/data"),
+        ("data1", "/host/data1"),
+        ("data2", "/host/data2"),
+    ]
+    seen_devices: set[str] = set()
+    for label, mountpoint in host_paths:
+        if not Path(mountpoint).exists():
             continue
-        seen.add(mountpoint)
         try:
             usage = psutil.disk_usage(mountpoint)
         except (PermissionError, OSError):
             continue
+        device = label
+        for partition in psutil.disk_partitions(all=False):
+            if partition.mountpoint == mountpoint:
+                device = partition.device
+                break
+        key = f"{usage.total}:{usage.free}:{mountpoint}"
+        if key in seen_devices:
+            continue
+        seen_devices.add(key)
         filesystems.append(
             {
-                "device": partition.device,
-                "mountpoint": mountpoint,
-                "fstype": partition.fstype,
+                "device": device,
+                "mountpoint": "/" if mountpoint == "/host" else mountpoint.removeprefix("/host"),
+                "label": label,
+                "fstype": "",
                 "total_bytes": usage.total,
                 "used_bytes": usage.used,
                 "free_bytes": usage.free,
                 "usage_percent": round(usage.percent, 1),
             }
         )
-    return filesystems[:12]
+    return filesystems
 
 
 def local_ip() -> str | None:
@@ -926,8 +943,40 @@ def prom_series_value(query: str) -> list[dict[str, Any]]:
             numeric = float(value)
         except (TypeError, ValueError):
             numeric = None
+        if numeric is not None and not math.isfinite(numeric):
+            numeric = None
         rows.append({"metric": metric, "value": numeric})
     return rows
+
+
+def node_exporter_usage_by_name() -> dict[str, dict[str, float]]:
+    uname_rows = prom_series_value("node_uname_info")
+    instance_to_name: dict[str, str] = {}
+    usage: dict[str, dict[str, float]] = {}
+    for row in uname_rows:
+        metric = row.get("metric", {})
+        instance = str(metric.get("instance") or "")
+        name = str(metric.get("nodename") or metric.get("hostname") or "").split(".")[0]
+        if instance and name:
+            instance_to_name[instance] = name
+            usage.setdefault(name, {})
+
+    cpu_rows = prom_series_value('100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)')
+    for row in cpu_rows:
+        instance = str(row.get("metric", {}).get("instance") or "")
+        name = instance_to_name.get(instance)
+        value = row.get("value")
+        if name and isinstance(value, (int, float)):
+            usage.setdefault(name, {})["cpu_usage_percent"] = round(value, 1)
+
+    mem_rows = prom_series_value("100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))")
+    for row in mem_rows:
+        instance = str(row.get("metric", {}).get("instance") or "")
+        name = instance_to_name.get(instance)
+        value = row.get("value")
+        if name and isinstance(value, (int, float)):
+            usage.setdefault(name, {})["memory_usage_percent"] = round(value, 1)
+    return usage
 
 
 def read_audit(limit: int) -> list[dict[str, Any]]:
@@ -1012,15 +1061,23 @@ def discovery() -> dict[str, Any]:
 def summary() -> dict[str, float]:
     cpu_alloc = prom_value("sum(slurm_cpus_alloc)")
     cpu_total = prom_value("sum(slurm_cpus_total)")
+    cluster_cpu_avg = prom_value('avg(100 - (rate(node_cpu_seconds_total{mode="idle"}[5m]) * 100))', -1)
+    cluster_core_total = prom_value('count(node_cpu_seconds_total{mode="idle"})', 0)
+    gpu_avg = prom_value("avg(DCGM_FI_DEV_GPU_UTIL)", -1)
     gpu_used = prom_value("count(DCGM_FI_DEV_GPU_UTIL > 0)")
     gpu_total = prom_value("count(DCGM_FI_DEV_GPU_UTIL)")
+    cpu_usage = cluster_cpu_avg if cluster_cpu_avg >= 0 else ((cpu_alloc / cpu_total * 100) if cpu_total else 0)
     return {
         "cpu_alloc": cpu_alloc,
-        "cpu_total": cpu_total,
-        "cpu_usage_percent": (cpu_alloc / cpu_total * 100) if cpu_total else 0,
+        "cpu_total": cluster_core_total or cpu_total,
+        "slurm_cpu_total": cpu_total,
+        "cluster_core_total": cluster_core_total or cpu_total,
+        "cpu_usage_percent": cpu_usage,
+        "cluster_cpu_usage_percent": cpu_usage,
         "gpu_used": gpu_used,
         "gpu_total": gpu_total,
-        "gpu_usage_percent": (gpu_used / gpu_total * 100) if gpu_total else prom_value("avg(DCGM_FI_DEV_GPU_UTIL)"),
+        "gpu_usage_percent": gpu_avg if gpu_avg >= 0 else ((gpu_used / gpu_total * 100) if gpu_total else 0),
+        "cluster_gpu_usage_percent": gpu_avg if gpu_avg >= 0 else ((gpu_used / gpu_total * 100) if gpu_total else 0),
         "jobs_running": prom_value("sum(slurm_queue_running)"),
         "jobs_pending": prom_value("sum(slurm_queue_pending)"),
         "nodes_down": prom_value("sum(slurm_nodes_down)"),
@@ -1268,23 +1325,32 @@ def jobs(user: str | None = None, state: str | None = None) -> dict[str, Any]:
 def nodes() -> dict[str, Any]:
     output = run_command(["scontrol", "show", "node", "-o"])
     rows = []
+    exporter_usage = node_exporter_usage_by_name()
     for line in output.splitlines():
         item = parse_kv_line(line)
         if not item.get("NodeName"):
             continue
+        node_name = item.get("NodeName", "")
+        usage = exporter_usage.get(node_name.split(".")[0], {})
+        state = item.get("State", "")
+        is_login = node_name.lower().startswith("login")
+        display_state = "MONITORED" if is_login and usage else state
         cfg_tres = item.get("CfgTRES", "")
         alloc_tres = item.get("AllocTRES", "")
         rows.append(
             {
-                "name": item.get("NodeName", ""),
+                "name": node_name,
                 "addr": item.get("NodeAddr", ""),
                 "hostname": item.get("NodeHostName", ""),
-                "state": item.get("State", ""),
+                "state": display_state,
+                "slurm_state": state,
                 "partitions": item.get("Partitions", ""),
                 "gres": item.get("Gres", ""),
                 "cpu_alloc": int(item.get("CPUAlloc", "0") or 0),
                 "cpu_total": int(item.get("CPUTot", "0") or 0),
                 "cpu_load": float(item.get("CPULoad", "0") or 0),
+                "cpu_usage_percent": usage.get("cpu_usage_percent"),
+                "memory_usage_percent": usage.get("memory_usage_percent"),
                 "mem_total_mb": int(item.get("RealMemory", "0") or 0),
                 "mem_free_mb": int(item.get("FreeMem", "0") or 0) if item.get("FreeMem", "0").isdigit() else 0,
                 "gpu_total": parse_gres_total(item.get("Gres", "")) or parse_tres(cfg_tres, "gres/gpu"),
