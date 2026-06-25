@@ -211,6 +211,34 @@ function nodeHealthType(node) {
   return "idle";
 }
 
+function nodeNumber(node) {
+  const match = String(node.name || "").match(/(\d+)$/);
+  return match ? Number(match[1]) : Number.POSITIVE_INFINITY;
+}
+
+function nodeFarmType(node) {
+  const name = String(node.name || "").toLowerCase();
+  const num = nodeNumber(node);
+  if (name.startsWith("login")) return "login";
+  if (num >= 21 || Number(node.gpu_total || 0) > 0 || String(node.gres || "").includes("gpu")) return "gpu";
+  if (num >= 1 && num <= 20) return "cpu";
+  return "other";
+}
+
+function nodeGroupMeta(type) {
+  return {
+    login: { title: "Login / Management", subtitle: "login node, controller, service host", className: "login" },
+    cpu: { title: "CPU Farm", subtitle: "node01 - node20", className: "cpu" },
+    gpu: { title: "GPU Farm", subtitle: "node21 - node28", className: "gpu" },
+    other: { title: "Other Nodes", subtitle: "unclassified Slurm nodes", className: "other" }
+  }[type] || { title: "Other Nodes", subtitle: "unclassified Slurm nodes", className: "other" };
+}
+
+function nodeUsagePercent(alloc, total) {
+  const value = Number(total) ? (Number(alloc || 0) / Number(total)) * 100 : 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
 function renderNodeInsights() {
   const nodes = latestNodes;
   const total = nodes.length;
@@ -307,6 +335,90 @@ function renderNodeInsights() {
       }).join("");
     }
   }
+}
+
+function renderNodeCardsGrouped() {
+  const nodeCardList = document.querySelector("#nodeCardList");
+  const nodes = latestNodes || [];
+  if (!nodeCardList) return;
+  if (!nodes.length) {
+    renderEmptyInline("#nodeCardList", "노드 상세 없음", "Slurm scontrol show node가 연결되면 노드 카드가 표시됩니다.");
+    return;
+  }
+
+  const grouped = nodes
+    .slice()
+    .sort((a, b) => nodeNumber(a) - nodeNumber(b) || String(a.name || "").localeCompare(String(b.name || "")))
+    .reduce((acc, node) => {
+      const type = nodeFarmType(node);
+      if (!acc[type]) acc[type] = [];
+      acc[type].push(node);
+      return acc;
+    }, {});
+
+  nodeCardList.innerHTML = ["login", "cpu", "gpu", "other"]
+    .filter((type) => grouped[type]?.length)
+    .map((type) => {
+      const group = grouped[type];
+      const meta = nodeGroupMeta(type);
+      const groupCpuAlloc = group.reduce((sum, node) => sum + Number(node.cpu_alloc || 0), 0);
+      const groupCpuTotal = group.reduce((sum, node) => sum + Number(node.cpu_total || 0), 0);
+      const groupGpuAlloc = group.reduce((sum, node) => sum + Number(node.gpu_alloc || 0), 0);
+      const groupGpuTotal = group.reduce((sum, node) => sum + Number(node.gpu_total || 0), 0);
+      const groupAttention = group.filter((node) => ["warn", "down"].includes(nodeHealthType(node))).length;
+
+      return `
+        <section class="node-farm ${meta.className}">
+          <div class="node-farm-header">
+            <div>
+              <strong>${meta.title}</strong>
+              <span>${meta.subtitle}</span>
+            </div>
+            <div class="node-farm-stats">
+              <b>${group.length} nodes</b>
+              <b>CPU ${groupCpuAlloc}/${groupCpuTotal}</b>
+              ${groupGpuTotal ? `<b>GPU ${groupGpuAlloc}/${groupGpuTotal}</b>` : ""}
+              ${groupAttention ? `<b class="warn">${groupAttention} attention</b>` : ""}
+            </div>
+          </div>
+          <div class="node-farm-grid">
+            ${group.map((node) => {
+              const health = nodeHealthType(node);
+              const farm = nodeFarmType(node);
+              const nodeCpuPct = nodeUsagePercent(node.cpu_alloc, node.cpu_total);
+              const nodeGpuPct = nodeUsagePercent(node.gpu_alloc, node.gpu_total);
+              const partitionList = String(node.partitions || "").split(",").filter(Boolean);
+              const partitions = partitionList.slice(0, 3);
+              const extraPartitions = Math.max(0, partitionList.length - partitions.length);
+              const gres = node.gres && node.gres !== "(null)" ? node.gres : "-";
+
+              return `
+                <article class="node-card ${health} ${farm}">
+                  <div class="node-card-head">
+                    <strong title="${escapeHtml(node.name || "-")}">${escapeHtml(node.name || "-")}</strong>
+                    <b>${escapeHtml(node.state || "unknown")}</b>
+                  </div>
+                  <div class="node-type-line">
+                    <span>${farm === "gpu" ? "GPU node" : farm === "cpu" ? "CPU node" : "Service node"}</span>
+                    <em>${escapeHtml(gres)}</em>
+                  </div>
+                  <div class="node-card-bars">
+                    <span>CPU <em>${node.cpu_alloc || 0}/${node.cpu_total || 0} · ${nodeCpuPct}%</em></span>
+                    <div class="mini-bar"><i style="width: ${nodeCpuPct}%"></i></div>
+                    <span>GPU <em>${node.gpu_alloc || 0}/${node.gpu_total || 0}${Number(node.gpu_total || 0) ? ` · ${nodeGpuPct}%` : ""}</em></span>
+                    <div class="mini-bar gpu-mini"><i style="width: ${nodeGpuPct}%"></i></div>
+                  </div>
+                  <div class="node-partitions">
+                    ${partitions.map((partition) => `<span>${escapeHtml(partition)}</span>`).join("")}
+                    ${extraPartitions ? `<span>+${extraPartitions}</span>` : ""}
+                  </div>
+                </article>
+              `;
+            }).join("")}
+          </div>
+        </section>
+      `;
+    }).join("");
 }
 
 function statusLabel(status) {
@@ -1751,6 +1863,7 @@ async function refreshData() {
   updateMetrics(latestSummary, latestSystem);
   renderRacks(document.querySelector(".segmented button.active")?.dataset.filter || "all");
   renderNodeInsights();
+  renderNodeCardsGrouped();
   renderJobs(searchInput.value);
   renderAlerts();
   renderSettings(latestDiscovery);
