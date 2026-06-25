@@ -38,6 +38,10 @@ AUTH_MODE = os.getenv("D_AQUILA_AUTH_MODE", "pam").lower()
 AUTH_SHADOW_FALLBACK = os.getenv("D_AQUILA_AUTH_SHADOW_FALLBACK", "true").lower() in {"1", "true", "yes", "on"}
 AUTH_SESSION_SECONDS = int(os.getenv("D_AQUILA_AUTH_SESSION_SECONDS", "28800"))
 HOST_SLURM_FALLBACK = os.getenv("D_AQUILA_HOST_SLURM_FALLBACK", "true").lower() in {"1", "true", "yes", "on"}
+SITE_NAME = os.getenv("D_AQUILA_SITE_NAME", "")
+SITE_FACILITY = os.getenv("D_AQUILA_SITE_FACILITY", "")
+SITE_LATITUDE = os.getenv("D_AQUILA_SITE_LATITUDE", "")
+SITE_LONGITUDE = os.getenv("D_AQUILA_SITE_LONGITUDE", "")
 SESSION_COOKIE = "d_aquila_session"
 SESSIONS: dict[str, dict[str, Any]] = {}
 RUNTIME_CONFIG: dict[str, Any] = {}
@@ -1058,11 +1062,13 @@ def discovery() -> dict[str, Any]:
 
 
 @app.get("/api/summary")
-def summary() -> dict[str, float]:
+def summary() -> dict[str, Any]:
     cpu_alloc = prom_value("sum(slurm_cpus_alloc)")
     cpu_total = prom_value("sum(slurm_cpus_total)")
     cluster_cpu_avg = prom_value('avg(100 - (rate(node_cpu_seconds_total{mode="idle"}[5m]) * 100))', -1)
     cluster_core_total = prom_value('count(node_cpu_seconds_total{mode="idle"})', 0)
+    cluster_memory_total = prom_value("sum(node_memory_MemTotal_bytes)", 0)
+    cluster_memory_available = prom_value("sum(node_memory_MemAvailable_bytes)", 0)
     gpu_avg = prom_value("avg(DCGM_FI_DEV_GPU_UTIL)", -1)
     gpu_used = prom_value("count(DCGM_FI_DEV_GPU_UTIL > 0)")
     gpu_total = prom_value("count(DCGM_FI_DEV_GPU_UTIL)")
@@ -1072,6 +1078,9 @@ def summary() -> dict[str, float]:
         "cpu_total": cluster_core_total or cpu_total,
         "slurm_cpu_total": cpu_total,
         "cluster_core_total": cluster_core_total or cpu_total,
+        "cluster_memory_total_bytes": cluster_memory_total,
+        "cluster_memory_used_bytes": max(cluster_memory_total - cluster_memory_available, 0) if cluster_memory_total else 0,
+        "cluster_memory_usage_percent": (100 * (1 - cluster_memory_available / cluster_memory_total)) if cluster_memory_total else 0,
         "cpu_usage_percent": cpu_usage,
         "cluster_cpu_usage_percent": cpu_usage,
         "gpu_used": gpu_used,
@@ -1084,6 +1093,12 @@ def summary() -> dict[str, float]:
         "max_gpu_temp_celsius": prom_value("max(DCGM_FI_DEV_GPU_TEMP)"),
         "gpu_power_watts": prom_value("sum(DCGM_FI_DEV_POWER_USAGE)"),
         "ipmi_up": prom_value('sum(up{job="ipmi"})'),
+        "site": {
+            "name": SITE_NAME,
+            "facility": SITE_FACILITY,
+            "latitude": SITE_LATITUDE,
+            "longitude": SITE_LONGITUDE,
+        },
     }
 
 

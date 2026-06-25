@@ -442,6 +442,65 @@ h2 {
   color: var(--warn);
 }
 
+.status-grid .metric.resource-hero {
+  min-height: 150px;
+  padding: 20px;
+  grid-column: span 2;
+}
+
+.status-grid .metric.resource-hero .metric-label {
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.status-grid .metric.resource-hero strong {
+  font-size: 46px;
+  line-height: 0.95;
+  font-weight: 950;
+  letter-spacing: 0;
+}
+
+.status-grid .metric.cpu-hero {
+  background: linear-gradient(135deg, #ffffff 0%, #eaf4ff 100%);
+}
+
+.status-grid .metric.cpu-hero::before {
+  background: var(--blue);
+}
+
+.status-grid .metric.cpu-hero strong {
+  color: var(--blue);
+}
+
+.status-grid .metric.gpu-hero {
+  background: linear-gradient(135deg, #ffffff 0%, #fff0f5 100%);
+}
+
+.status-grid .metric.gpu-hero::before {
+  background: var(--rose);
+}
+
+.status-grid .metric.gpu-hero strong {
+  color: var(--rose);
+}
+
+.status-grid .metric.memory-hero {
+  background: linear-gradient(135deg, #ffffff 0%, #f2efff 100%);
+}
+
+.status-grid .metric.memory-hero::before {
+  background: var(--violet);
+}
+
+.status-grid .metric.memory-hero strong {
+  color: var(--violet);
+  font-size: 42px;
+}
+
+.location-metric {
+  background: linear-gradient(135deg, #ffffff 0%, #eefaf7 100%);
+}
+
 .sparkline {
   width: 100%;
   height: 36px;
@@ -1369,10 +1428,9 @@ h2 {
 }
 
 .dot-matrix {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(13px, 1fr));
-  gap: 8px;
-  min-height: 150px;
+  display: block;
+  min-height: 260px;
+  overflow: visible;
   align-content: start;
 }
 
@@ -1926,13 +1984,14 @@ h2 {
 
 .dot-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
-  gap: 7px;
+  grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+  gap: 8px;
+  min-width: 0;
 }
 
 .node-dot {
   min-width: 0;
-  height: 28px;
+  height: 34px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1940,8 +1999,9 @@ h2 {
   color: white;
   background: linear-gradient(90deg, var(--dot-color) var(--load), rgba(124, 141, 156, 0.28) var(--load));
   border: 1px solid rgba(22, 34, 46, 0.16);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 900;
+  white-space: nowrap;
 }
 
 .node-dot.idle {

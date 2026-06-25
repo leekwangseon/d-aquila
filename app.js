@@ -1897,6 +1897,49 @@ function ensureLocationMetric(system) {
   setText("#locationDetailMetric", [system?.ip_address, "D-aquila API"].filter(Boolean).join(" · ") || "master node");
 }
 
+function ensureLocationMetric(system, site = {}) {
+  const grid = document.querySelector('.status-grid[aria-label="Operations summary"]');
+  if (!grid) return;
+  if (!document.querySelector("#locationMetric")) {
+    const card = document.createElement("article");
+    card.className = "metric location-metric";
+    card.innerHTML = `
+      <span class="metric-label">물리 위치</span>
+      <strong id="locationMetric">-</strong>
+      <small id="locationDetailMetric">site not configured</small>
+    `;
+    grid.appendChild(card);
+  }
+  setText("#locationMetric", site.name || "위치 미설정");
+  setText("#locationDetailMetric", [site.facility, site.latitude && site.longitude ? `${site.latitude}, ${site.longitude}` : "", system?.hostname].filter(Boolean).join(" · ") || "D_AQUILA_SITE_NAME 설정 필요");
+}
+
+function ensureResourceHeroMetrics() {
+  const grid = document.querySelector('.status-grid[aria-label="Operations summary"]');
+  if (!grid) return;
+  document.querySelector("#coresMetric")?.closest(".metric")?.classList.add("resource-hero", "cpu-hero");
+  if (!document.querySelector("#totalGpuMetric")) {
+    const gpuCard = document.createElement("article");
+    gpuCard.className = "metric resource-hero gpu-hero";
+    gpuCard.innerHTML = `
+      <span class="metric-label">전체 GPU</span>
+      <strong id="totalGpuMetric">-</strong>
+      <small id="totalGpuDetailMetric">cluster total</small>
+    `;
+    document.querySelector("#coresMetric")?.closest(".metric")?.after(gpuCard);
+  }
+  if (!document.querySelector("#totalMemoryMetric")) {
+    const memCard = document.createElement("article");
+    memCard.className = "metric resource-hero memory-hero";
+    memCard.innerHTML = `
+      <span class="metric-label">전체 메모리</span>
+      <strong id="totalMemoryMetric">-</strong>
+      <small id="totalMemoryDetailMetric">cluster total</small>
+    `;
+    document.querySelector("#totalGpuMetric")?.closest(".metric")?.after(memCard);
+  }
+}
+
 function updateMetrics(summary, system) {
   const systemCpu = Number(system?.cpu?.usage_percent);
   const clusterCpu = Number(summary?.cluster_cpu_usage_percent ?? summary?.cpu_usage_percent);
@@ -1911,13 +1954,20 @@ function updateMetrics(summary, system) {
   const physicalCores = Number(system?.cpu?.physical_count || 0);
   const clusterCores = Number(summary?.cluster_core_total || summary?.cpu_total || 0);
   const clusterGpus = Number(summary?.gpu_total || 0);
+  const clusterMemoryTotal = Number(summary?.cluster_memory_total_bytes || 0);
+  const clusterMemoryUsed = Number(summary?.cluster_memory_used_bytes || 0);
+  const site = summary?.site || {};
   const load1 = Number(system?.cpu?.load1 || 0);
   const load5 = Number(system?.cpu?.load5 || 0);
   const load15 = Number(system?.cpu?.load15 || 0);
   const loadPressure = logicalCores ? (load1 / logicalCores) * 100 : Number.NaN;
 
   setText("#cpuMetric", formatPercent(cpu));
+  const cpuLabel = document.querySelector("#cpuMetric")?.closest(".metric")?.querySelector(".metric-label");
+  if (cpuLabel) cpuLabel.textContent = "전체 클러스터 CPU 사용률";
   setText("#gpuMetric", gpu > 0 ? formatPercent(gpu) : "N/A");
+  const gpuLabel = document.querySelector("#gpuMetric")?.closest(".metric")?.querySelector(".metric-label");
+  if (gpuLabel) gpuLabel.textContent = "전체 클러스터 GPU 사용률";
   setText("#queueMetric", String(Math.round(pending)));
   setText("#tempMetric", temp > 0 ? `${Math.round(temp)}°C` : "N/A");
   setText("#powerMetric", power > 0 ? `${Math.round(power)} W` : "N/A");
@@ -1933,10 +1983,17 @@ function updateMetrics(summary, system) {
   setText("#hostMetric", system?.hostname || "local server");
   setText("#uptimeMetric", system?.uptime_human || "-");
   setText("#bootShortMetric", system?.boot_time ? `boot ${formatDateShort(system.boot_time)}` : "boot time");
-  ensureLocationMetric(system);
+  ensureLocationMetric(system, site);
+  ensureResourceHeroMetrics();
   setText("#coresMetric", clusterCores ? `${Math.round(clusterCores)}` : "-");
+  setText("#coresDetailMetric", "cluster CPU cores");
+  setText("#totalGpuMetric", clusterGpus ? `${Math.round(clusterGpus)}` : "-");
+  setText("#totalGpuDetailMetric", "cluster GPUs");
+  setText("#totalMemoryMetric", clusterMemoryTotal ? formatBytes(clusterMemoryTotal) : "-");
+  setText("#totalMemoryDetailMetric", clusterMemoryTotal ? `${formatBytes(clusterMemoryUsed)} used` : "cluster memory");
   setText("#coresDetailMetric", clusterGpus ? `${Math.round(clusterGpus)} GPUs · cluster total` : "cluster CPU cores");
   setText("#cpuMetricDetail", formatPercent(cpu));
+  setText("#coresDetailMetric", "cluster CPU cores");
   setText("#cpuDetail", system?.cpu ? `${system.cpu.logical_count} logical / ${system.cpu.physical_count || "-"} physical` : "logical cores");
   setText("#memMetricDetail", Number.isFinite(system?.memory?.usage_percent) ? `${Math.round(system.memory.usage_percent)}%` : "N/A");
   setText("#memDetailDetail", system?.memory ? `${formatBytes(system.memory.available_bytes)} available` : "local server");
