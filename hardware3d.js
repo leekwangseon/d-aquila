@@ -255,7 +255,8 @@ function bindPanelControls() {
     const units = clampNumber(document.querySelector("#hardwareUnitInput")?.value, 1, 8, 2);
     const startU = clampNumber(document.querySelector("#hardwareStartUInput")?.value, 1, RACK_UNITS - units + 1, 1);
     const layout = readLayout();
-    layout[name] = { units, startU };
+    const current = state.selected.userData.layout || {};
+    layout[name] = { units, startU, rackIndex: current.rackIndex || 0 };
     saveLayout(layout);
     rebuildRack(name);
   });
@@ -279,7 +280,7 @@ function moveSelected(delta) {
   const current = layout[name] || state.selected.userData.layout || { units: 2, startU: 1 };
   const units = clampNumber(current.units, 1, 8, 2);
   const startU = clampNumber(Number(current.startU || 1) + delta, 1, RACK_UNITS - units + 1, 1);
-  layout[name] = { units, startU };
+  layout[name] = { units, startU, rackIndex: current.rackIndex || 0 };
   saveLayout(layout);
   rebuildRack(name);
 }
@@ -339,45 +340,79 @@ function buildRack(nodes) {
   state.rackGroup.add(activeRackGroup);
   state.contextGroups.activeRackGroup = activeRackGroup;
 
-  addBox(activeRackGroup, [width + 0.28, 0.18, depth + 0.22], [0, height / 2, 0], trimMat);
-  addBox(activeRackGroup, [width + 0.28, 0.2, depth + 0.22], [0, -height / 2, 0], trimMat);
-  addBox(activeRackGroup, [0.14, height, 0.14], [-width / 2, 0, frontZ], rackMat);
-  addBox(activeRackGroup, [0.14, height, 0.14], [width / 2, 0, frontZ], rackMat);
-  addBox(activeRackGroup, [0.18, height, depth], [-width / 2, 0, 0], sideMat);
-  addBox(activeRackGroup, [0.18, height, depth], [width / 2, 0, 0], sideMat);
-  addBox(activeRackGroup, [width, height, 0.16], [0, 0, -depth / 2], sideMat);
-  addBox(activeRackGroup, [0.045, height - 0.46, 0.08], [-width / 2 + 0.18, 0, frontZ + 0.05], railMat);
-  addBox(activeRackGroup, [0.045, height - 0.46, 0.08], [width / 2 - 0.18, 0, frontZ + 0.05], railMat);
-  addRackUnitTicks(activeRackGroup, width, height, frontZ, unitHeight, bottomY);
-  addSideVents(activeRackGroup, width, depth, height);
-  addSideLogos(activeRackGroup, width, height);
-  addRearPdu(activeRackGroup, width, depth, height);
-  addWheels(activeRackGroup, width, depth, height);
+  const placements = computePlacements(nodes);
+  const rackCount = Math.max(1, placements.reduce((max, item) => Math.max(max, item.rackIndex + 1), 0));
+  const rackGap = 0.72;
+  const rackSpacing = width + rackGap;
+  const rackGroups = Array.from({ length: rackCount }, (_, rackIndex) => {
+    const rack = new THREE.Group();
+    rack.name = `rack-${rackIndex + 1}`;
+    rack.position.x = (rackIndex - (rackCount - 1) / 2) * rackSpacing;
+    activeRackGroup.add(rack);
+    buildRackFrame(rack, {
+      width,
+      depth,
+      height,
+      frontZ,
+      unitHeight,
+      bottomY,
+      rackMat,
+      sideMat,
+      trimMat,
+      railMat,
+      label: `RACK ${String(rackIndex + 1).padStart(2, "0")}`
+    });
+    return rack;
+  });
 
-  const actualNodes = nodes.slice(0, RACK_UNITS);
-  const placements = computePlacements(actualNodes);
-  placements.forEach(({ node, units, startU }) => {
+  placements.forEach(({ node, units, startU, rackIndex }) => {
     const type = nodeType(node);
     const group = new THREE.Group();
     const y = bottomY + ((startU - 1) + units / 2) * unitHeight;
     const serverHeight = Math.max(unitHeight * units * 0.9, unitHeight * 0.72);
     const isGpu = Number(node.gpu_total || 0) > 0;
-    createServer(group, node, type, y, serverHeight, width, frontZ, isGpu, { units, startU });
-    activeRackGroup.add(group);
+    createServer(group, node, type, y, serverHeight, width, frontZ, isGpu, { units, startU, rackIndex });
+    rackGroups[Math.min(rackGroups.length - 1, Math.max(0, rackIndex || 0))]?.add(group);
   });
   updateContextVisibility();
 }
 
+function buildRackFrame(parent, parts) {
+  const { width, depth, height, frontZ, unitHeight, bottomY, rackMat, sideMat, trimMat, railMat, label } = parts;
+  addBox(parent, [width + 0.28, 0.18, depth + 0.22], [0, height / 2, 0], trimMat);
+  addBox(parent, [width + 0.28, 0.2, depth + 0.22], [0, -height / 2, 0], trimMat);
+  addBox(parent, [0.14, height, 0.14], [-width / 2, 0, frontZ], rackMat);
+  addBox(parent, [0.14, height, 0.14], [width / 2, 0, frontZ], rackMat);
+  addBox(parent, [0.18, height, depth], [-width / 2, 0, 0], sideMat);
+  addBox(parent, [0.18, height, depth], [width / 2, 0, 0], sideMat);
+  addBox(parent, [width, height, 0.16], [0, 0, -depth / 2], sideMat);
+  addBox(parent, [0.045, height - 0.46, 0.08], [-width / 2 + 0.18, 0, frontZ + 0.05], railMat);
+  addBox(parent, [0.045, height - 0.46, 0.08], [width / 2 - 0.18, 0, frontZ + 0.05], railMat);
+  addRackUnitTicks(parent, width, height, frontZ, unitHeight, bottomY);
+  addSideVents(parent, width, depth, height);
+  addSideLogos(parent, width, height);
+  addRearPdu(parent, width, depth, height);
+  addWheels(parent, width, depth, height);
+  addRackLabel(parent, label, [0, height / 2 + 0.16, frontZ + 0.02]);
+}
+
 function computePlacements(nodes) {
   const layout = readLayout();
+  const sorted = nodes.slice().sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, { numeric: true }));
   let nextU = 1;
-  return nodes.map((node) => {
+  let rackIndex = 0;
+  return sorted.map((node) => {
     const saved = layout[node.name] || {};
     const units = clampNumber(saved.units, 1, 8, Number(node.gpu_total || 0) > 0 ? 4 : 2);
     const maxStart = Math.max(1, RACK_UNITS - units + 1);
+    if (!saved.startU && nextU + units - 1 > RACK_UNITS) {
+      rackIndex += 1;
+      nextU = 1;
+    }
+    const effectiveRackIndex = Number.isFinite(Number(saved.rackIndex)) ? clampNumber(saved.rackIndex, 0, 99, rackIndex) : rackIndex;
     const startU = saved.startU ? clampNumber(saved.startU, 1, maxStart, nextU) : clampNumber(nextU, 1, maxStart, 1);
     nextU = Math.min(RACK_UNITS, startU + units);
-    return { node, units, startU };
+    return { node, units, startU, rackIndex: effectiveRackIndex };
   });
 }
 
@@ -455,6 +490,31 @@ function addRoomLabel(parent, text, position, color) {
   parent.add(mesh);
 }
 
+function addRackLabel(parent, text, position) {
+  const texture = createTextTexture(text, { width: 640, height: 160, background: "rgba(5,8,11,0.94)", color: "#f4f7fb", accent: 0xd95f43 });
+  const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, toneMapped: false });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.36, 0.34), material);
+  mesh.position.set(...position);
+  parent.add(mesh);
+}
+
+function addHostnameLabel(parent, text, position, faceHeight) {
+  const texture = createTextTexture(text, {
+    width: 512,
+    height: 128,
+    background: "rgba(7,12,16,0.86)",
+    color: "#ffffff",
+    accent: 0x32a9c7,
+    font: "800 48px Arial, sans-serif"
+  });
+  const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, toneMapped: false });
+  const width = Math.min(0.56, Math.max(0.42, String(text).length * 0.055));
+  const height = Math.min(0.14, Math.max(0.07, faceHeight * 0.24));
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
+  mesh.position.set(...position);
+  parent.add(mesh);
+}
+
 function addFloorContext(parent) {
   const slabMat = createMaterial(0xf5f7fa, 0.8, 0.02);
   const wallMat = createMaterial(0xcbd5df, 0.68, 0.04);
@@ -523,7 +583,7 @@ function createTextTexture(text, options = {}) {
   ctx.fillStyle = typeof options.accent === "number" ? `#${options.accent.toString(16).padStart(6, "0")}` : "#0b6f7a";
   ctx.fillRect(0, 0, 18, height);
   ctx.fillStyle = options.color || "#17202a";
-  ctx.font = "700 58px Arial, sans-serif";
+  ctx.font = options.font || "700 58px Arial, sans-serif";
   ctx.textBaseline = "middle";
   ctx.fillText(text, 48, height / 2);
   const texture = new THREE.CanvasTexture(canvas);
@@ -655,6 +715,7 @@ function createServer(group, node, type, y, serverHeight, rackWidth, frontZ, isG
   face.userData = { node, type, layout };
 
   addServerFaceDetails(group, {
+    node,
     y,
     serverHeight,
     faceHeight,
@@ -673,6 +734,7 @@ function createServer(group, node, type, y, serverHeight, rackWidth, frontZ, isG
 
 function addServerFaceDetails(group, parts) {
   const {
+    node,
     y,
     serverHeight,
     faceHeight,
@@ -721,6 +783,7 @@ function addServerFaceDetails(group, parts) {
   if (isGpu) {
     addBox(group, [rackWidth - 0.7, Math.max(safeHeight * 0.06, 0.018), 0.12], [0, y - safeHeight * 0.37, z + 0.1], createMaterial(COLORS.gpu, 0.32, 0.1), "gpu-accent-line");
   }
+  addHostnameLabel(group, node?.name || "server", [0, y + safeHeight * 0.34, z + 0.17], safeHeight);
 }
 
 function addDriveBayLines(group, x, y, z, bayWidth, bayHeight, material) {
@@ -782,7 +845,7 @@ function selectDevice(mesh) {
       <dl>
         <dt>CPU</dt><dd>${node.cpu_alloc || 0}/${node.cpu_total || 0} cores · ${cpuPct}%</dd>
         <dt>GPU</dt><dd>${escapeHtml(gpuText)}</dd>
-        <dt>Rack U</dt><dd>${layout.startU}U부터 ${layout.units}U 사용</dd>
+        <dt>Rack U</dt><dd>Rack ${(layout.rackIndex || 0) + 1} · ${layout.startU}U부터 ${layout.units}U 사용</dd>
         <dt>Reason</dt><dd>${escapeHtml(node.reason || "-")}</dd>
       </dl>
     `;
@@ -891,7 +954,7 @@ function animate() {
 function update(payload = {}) {
   initScene();
   state.currentSystem = payload.system || {};
-  state.currentNodes = payload.nodes?.length ? payload.nodes.slice(0, RACK_UNITS) : [fallbackNode(payload.system)];
+  state.currentNodes = payload.nodes?.length ? payload.nodes.slice() : [fallbackNode(payload.system)];
   buildRack(state.currentNodes);
   updatePduPanel();
   const selectedStillExists = state.currentNodes.find((node) => node.name === state.selected?.userData?.node?.name);

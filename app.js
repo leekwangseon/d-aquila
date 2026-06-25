@@ -1336,6 +1336,39 @@ function renderHardwareView() {
   }
 }
 
+function estimateHardwareRackCount(nodes) {
+  if (!nodes.length) return 1;
+  let racks = 1;
+  let used = 0;
+  nodes.forEach((node) => {
+    const units = Number(node.gpu_total || 0) > 0 ? 4 : 2;
+    if (used + units > 42) {
+      racks += 1;
+      used = 0;
+    }
+    used += units;
+  });
+  return racks;
+}
+
+function renderHardwareView() {
+  const gpuNodes = latestNodes.filter((node) => Number(node.gpu_total || 0) > 0).length;
+  const warnNodes = latestNodes.filter((node) => ["warn", "down"].includes(nodeHealthType(node))).length;
+  const deviceCount = latestNodes.length || 1;
+  const rackEstimate = estimateHardwareRackCount(latestNodes);
+  setText("#hardwareDeviceCount", String(deviceCount));
+  setText("#hardwareGpuCount", String(gpuNodes));
+  setText("#hardwareWarnCount", String(warnNodes));
+  setText("#hardwareRackSummary", latestNodes.length ? `${latestNodes.length} nodes mapped across ${rackEstimate} rack${rackEstimate > 1 ? "s" : ""}` : "단독 서버 1대 기준 가상 랙");
+  if (window.DAquilaHardware3D?.update) {
+    window.DAquilaHardware3D.update({
+      nodes: latestNodes,
+      system: latestSystem,
+      summary: latestSummary
+    });
+  }
+}
+
 function logLevelLabel(level) {
   if (level === "error") return "오류";
   if (level === "warn") return "경고";
