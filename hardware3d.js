@@ -14,6 +14,8 @@ const state = {
   selected: null,
   currentNodes: [],
   currentSystem: {},
+  externalLayout: {},
+  externalPdu: {},
   rackMeta: null,
   logoTexture: null,
   logoCanvas: null,
@@ -270,6 +272,10 @@ function bindPanelControls() {
     savePdu({ capacityWatts, allocatedWatts });
     updatePduPanel();
     rebuildRack(state.selected?.userData?.node?.name);
+  });
+
+  document.querySelector("#hardwareSaveLayout")?.addEventListener("click", () => {
+    dispatchLayoutChange();
   });
 }
 
@@ -885,7 +891,8 @@ function setPlacementDisabled(disabled) {
     "#hardwareStartUInput",
     "#hardwareMoveDown",
     "#hardwareMoveUp",
-    "#hardwareApplyLayout"
+    "#hardwareApplyLayout",
+    "#hardwareSaveLayout"
   ].forEach((selector) => {
     const element = document.querySelector(selector);
     if (element) element.disabled = disabled;
@@ -906,27 +913,51 @@ function updatePduPanel() {
 }
 
 function readLayout() {
+  const external = state.externalLayout || {};
   try {
-    return JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}") || {};
+    return { ...external, ...(JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}") || {}) };
   } catch {
-    return {};
+    return { ...external };
   }
 }
 
 function saveLayout(layout) {
   localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+  dispatchLayoutChange();
 }
 
 function readPdu() {
+  const external = state.externalPdu || {};
   try {
-    return { capacityWatts: 6000, allocatedWatts: 0, ...(JSON.parse(localStorage.getItem(PDU_KEY) || "{}") || {}) };
+    return { capacityWatts: 6000, allocatedWatts: 0, ...external, ...(JSON.parse(localStorage.getItem(PDU_KEY) || "{}") || {}) };
   } catch {
-    return { capacityWatts: 6000, allocatedWatts: 0 };
+    return { capacityWatts: 6000, allocatedWatts: 0, ...external };
   }
 }
 
 function savePdu(pdu) {
   localStorage.setItem(PDU_KEY, JSON.stringify(pdu));
+  dispatchLayoutChange();
+}
+
+function facilityToLayout(facility = {}) {
+  const layout = {};
+  (facility.devices || []).forEach((device) => {
+    const name = device.name || device.node || device.hostname;
+    if (!name) return;
+    layout[name] = {
+      units: clampNumber(device.units, 1, 8, Number(device.units || 2)),
+      startU: clampNumber(device.startU ?? device.start_u, 1, RACK_UNITS, Number(device.startU || device.start_u || 1)),
+      rackIndex: clampNumber(device.rackIndex ?? device.rack_index, 0, 99, Number(device.rackIndex || device.rack_index || 0)),
+    };
+  });
+  return layout;
+}
+
+function dispatchLayoutChange() {
+  window.dispatchEvent(new CustomEvent("d-aquila-hardware-layout-change", {
+    detail: { layout: readLayout(), pdu: readPdu() }
+  }));
 }
 
 function clampNumber(value, min, max, fallback) {
@@ -961,6 +992,8 @@ function animate() {
 function update(payload = {}) {
   initScene();
   state.currentSystem = payload.system || {};
+  state.externalLayout = facilityToLayout(payload.facility || {});
+  state.externalPdu = payload.facility?.pdu || {};
   state.currentNodes = payload.nodes?.length ? payload.nodes.slice() : [fallbackNode(payload.system)];
   buildRack(state.currentNodes);
   updatePduPanel();

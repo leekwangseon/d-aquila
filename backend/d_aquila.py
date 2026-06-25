@@ -16,7 +16,9 @@ import shutil
 import socket
 import urllib.error
 from datetime import datetime
+from email.message import EmailMessage
 from pathlib import Path
+import smtplib
 from typing import Any
 
 import psutil
@@ -99,6 +101,7 @@ class JobPolicyRequest(BaseModel):
     max_memory_gb: int = Field(default=256, ge=1, le=4096)
     max_time_hours: int = Field(default=24, ge=1, le=24 * 30)
     allow_custom_script: bool = True
+    auto_submit_approved: bool = False
 
 
 class PrometheusConfigRequest(BaseModel):
@@ -115,6 +118,7 @@ class AccessModelRequest(BaseModel):
     admin_groups: list[str] = Field(default_factory=list)
     operator_groups: list[str] = Field(default_factory=list)
     viewer_groups: list[str] = Field(default_factory=list)
+    permissions: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class JobTemplateRequest(BaseModel):
@@ -141,10 +145,20 @@ class ApprovalDecisionRequest(BaseModel):
 class FacilityLayoutRequest(BaseModel):
     rooms: list[dict[str, Any]] = Field(default_factory=list)
     racks: list[dict[str, Any]] = Field(default_factory=list)
+    devices: list[dict[str, Any]] = Field(default_factory=list)
+    pdu: dict[str, Any] = Field(default_factory=dict)
 
 
 class AlertChannelsRequest(BaseModel):
     webhook_url: str = Field(default="", max_length=500)
+    slack_webhook_url: str = Field(default="", max_length=500)
+    teams_webhook_url: str = Field(default="", max_length=500)
+    smtp_host: str = Field(default="", max_length=200)
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str = Field(default="", max_length=200)
+    smtp_password: str = Field(default="", max_length=500)
+    smtp_from: str = Field(default="", max_length=200)
+    smtp_tls: bool = True
     email_recipients: list[str] = Field(default_factory=list)
     enabled_events: list[str] = Field(default_factory=list)
 
@@ -158,6 +172,24 @@ def default_policy() -> dict[str, Any]:
         "max_memory_gb": 256,
         "max_time_hours": 24,
         "allow_custom_script": True,
+        "auto_submit_approved": False,
+    }
+
+
+def default_permission_matrix() -> dict[str, list[str]]:
+    return {
+        "dashboard.view": ["admin", "operator", "viewer"],
+        "jobs.view": ["admin", "operator", "viewer"],
+        "jobs.submit": ["admin", "operator"],
+        "jobs.cancel": ["admin", "operator"],
+        "jobs.policy.manage": ["admin"],
+        "templates.manage": ["admin", "operator"],
+        "approvals.request": ["admin", "operator", "viewer"],
+        "approvals.decide": ["admin", "operator"],
+        "prometheus.manage": ["admin", "operator"],
+        "facility.manage": ["admin", "operator"],
+        "alerts.manage": ["admin"],
+        "access.manage": ["admin"],
     }
 
 
@@ -169,6 +201,7 @@ def default_access_model() -> dict[str, Any]:
         "admin_groups": ["root", "wheel"],
         "operator_groups": [],
         "viewer_groups": [],
+        "permissions": default_permission_matrix(),
     }
 
 
@@ -203,13 +236,48 @@ def default_facility_layout() -> dict[str, Any]:
     return {
         "rooms": [{"id": "room-a", "name": "Data Hall A", "floor": "2F"}],
         "racks": [{"id": "rack-a01", "name": "Rack A01", "room_id": "room-a", "units": 42, "pdu_watts": 6000}],
+        "devices": [],
+        "pdu": {"capacityWatts": 6000, "allocatedWatts": 0},
+    }
+
+
+def default_alert_channels() -> dict[str, Any]:
+    return {
+        "webhook_url": "",
+        "slack_webhook_url": "",
+        "teams_webhook_url": "",
+        "smtp_host": "",
+        "smtp_port": 587,
+        "smtp_username": "",
+        "smtp_password": "",
+        "smtp_from": "",
+        "smtp_tls": True,
+        "email_recipients": [],
+        "enabled_events": [
+            "job.submit",
+            "job.cancel",
+            "approval.request",
+            "approval.decision",
+            "approval.auto_submit",
+            "node.down",
+            "target.down",
+            "alert.test",
+        ],
     }
 
 
 def load_runtime_config() -> dict[str, Any]:
     GENERATED_DIR.mkdir(parents=True, exist_ok=True)
     if not CONFIG_PATH.exists():
-        return {"prometheus": {"url": PROMETHEUS_URL}, "job_policy": default_policy()}
+        return {
+            "prometheus": {"url": PROMETHEUS_URL},
+            "job_policy": default_policy(),
+            "access_model": default_access_model(),
+            "job_templates": default_templates(),
+            "approvals": [],
+            "facility_layout": default_facility_layout(),
+            "alert_channels": default_alert_channels(),
+        }
     try:
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -221,12 +289,7 @@ def load_runtime_config() -> dict[str, Any]:
         "job_templates": data.get("job_templates") or default_templates(),
         "approvals": data.get("approvals") or [],
         "facility_layout": {**default_facility_layout(), **(data.get("facility_layout") or {})},
-        "alert_channels": {
-            "webhook_url": "",
-            "email_recipients": [],
-            "enabled_events": ["job.submit", "job.cancel", "node.down", "target.down"],
-            **(data.get("alert_channels") or {}),
-        },
+        "alert_channels": {**default_alert_channels(), **(data.get("alert_channels") or {})},
     }
 
 
@@ -290,6 +353,27 @@ def require_role(username: str | None, allowed: set[str]) -> None:
         raise HTTPException(status_code=403, detail=f"Role '{role}' is not allowed for this operation")
 
 
+def permission_matrix() -> dict[str, list[str]]:
+    model = RUNTIME_CONFIG.get("access_model") or default_access_model()
+    matrix = {**default_permission_matrix(), **(model.get("permissions") or {})}
+    return {
+        key: sorted(set(str(role).strip() for role in roles if str(role).strip()))
+        for key, roles in matrix.items()
+    }
+
+
+def has_permission(username: str | None, permission: str) -> bool:
+    role = user_role(username)
+    if role == "admin":
+        return True
+    return role in permission_matrix().get(permission, [])
+
+
+def require_permission(username: str | None, permission: str) -> None:
+    if not has_permission(username, permission):
+        raise HTTPException(status_code=403, detail=f"Permission '{permission}' is not allowed for this user")
+
+
 def slug(value: str) -> str:
     clean = re.sub(r"[^a-zA-Z0-9_.-]+", "-", value.strip().lower()).strip("-")
     return clean or secrets.token_hex(4)
@@ -328,13 +412,52 @@ def notify_event(event: str, payload: dict[str, Any]) -> None:
     channels = RUNTIME_CONFIG.get("alert_channels") or {}
     if event not in channels.get("enabled_events", []):
         return
-    webhook_url = channels.get("webhook_url")
-    if not webhook_url:
+    message = format_alert_message(event, payload)
+    for url, body in [
+        (channels.get("webhook_url"), {"event": event, "payload": payload}),
+        (channels.get("slack_webhook_url"), {"text": message}),
+        (channels.get("teams_webhook_url"), {"text": message}),
+    ]:
+        if not url:
+            continue
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            urllib.request.urlopen(req, timeout=min(COMMAND_TIMEOUT, 5)).read()
+        except Exception:
+            pass
+    send_smtp_alert(channels, event, message, payload)
+
+
+def format_alert_message(event: str, payload: dict[str, Any]) -> str:
+    title = {
+        "job.submit": "D-aquila job submitted",
+        "job.cancel": "D-aquila job cancelled",
+        "approval.request": "D-aquila approval requested",
+        "approval.decision": "D-aquila approval decided",
+        "approval.auto_submit": "D-aquila approved job auto-submitted",
+        "alert.test": "D-aquila alert test",
+    }.get(event, f"D-aquila event: {event}")
+    compact = ", ".join(f"{key}={value}" for key, value in payload.items() if key not in {"script"})
+    return f"{title}\n{compact}".strip()
+
+
+def send_smtp_alert(channels: dict[str, Any], event: str, message: str, payload: dict[str, Any]) -> None:
+    recipients = [item.strip() for item in channels.get("email_recipients", []) if item.strip()]
+    if not recipients or not channels.get("smtp_host"):
         return
-    body = json.dumps({"event": event, "payload": payload}, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(webhook_url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+    mail = EmailMessage()
+    mail["Subject"] = f"[D-aquila] {event}"
+    mail["From"] = channels.get("smtp_from") or channels.get("smtp_username") or "d-aquila@localhost"
+    mail["To"] = ", ".join(recipients)
+    mail.set_content(f"{message}\n\nPayload:\n{json.dumps(payload, ensure_ascii=False, indent=2)}")
     try:
-        urllib.request.urlopen(req, timeout=min(COMMAND_TIMEOUT, 5)).read()
+        with smtplib.SMTP(channels.get("smtp_host"), int(channels.get("smtp_port") or 587), timeout=min(COMMAND_TIMEOUT, 8)) as smtp:
+            if channels.get("smtp_tls", True):
+                smtp.starttls()
+            if channels.get("smtp_username"):
+                smtp.login(channels.get("smtp_username"), channels.get("smtp_password") or "")
+            smtp.send_message(mail)
     except Exception:
         pass
 
@@ -985,6 +1108,39 @@ def enforce_submit_policy(request: SubmitRequest) -> None:
         raise HTTPException(status_code=403, detail=f"Time request exceeds policy limit: {policy.get('max_time_hours')}h")
 
 
+def run_sbatch_request(request: SubmitRequest, user: str | None, audit_action: str = "job.submit") -> dict[str, Any]:
+    enforce_submit_policy(request)
+    with tempfile.NamedTemporaryFile("w", suffix=".sbatch", prefix="d-aquila-", delete=False) as handle:
+        handle.write(request.script)
+        script_path = handle.name
+    try:
+        output = run_command(["sbatch", script_path])
+    finally:
+        try:
+            os.unlink(script_path)
+        except OSError:
+            pass
+    match = re.search(r"Submitted batch job (\S+)", output)
+    result = {"submitted": True, "job_id": match.group(1) if match else None, "output": output.strip()}
+    audit(audit_action, user, {"name": request.name, "partition": request.partition, "cpu": request.cpu, "gpu": request.gpu, "job_id": result["job_id"]}, "ok")
+    notify_event("job.submit", {"user": user, "name": request.name, "partition": request.partition, "job_id": result["job_id"]})
+    return result
+
+
+def submit_request_from_template(template: dict[str, Any], parameters: dict[str, Any] | None = None) -> SubmitRequest:
+    params = parameters or {}
+    payload = {
+        "name": params.get("name") or template.get("name") or template.get("id") or "d-aquila-job",
+        "partition": params.get("partition") or template.get("partition") or "batch",
+        "cpu": int(params.get("cpu") or template.get("cpu") or 1),
+        "gpu": int(params.get("gpu") or template.get("gpu") or 0),
+        "memory": str(params.get("memory") or template.get("memory") or "1G"),
+        "time": str(params.get("time") or template.get("time") or "01:00:00"),
+        "script": str(params.get("script") or template.get("script") or "#!/bin/bash\nhostname\n"),
+    }
+    return SubmitRequest(**payload)
+
+
 def parse_target_lines(items: list[str]) -> list[str]:
     targets: list[str] = []
     for item in items:
@@ -1451,31 +1607,14 @@ def nodes() -> dict[str, Any]:
 @app.post("/api/jobs/submit")
 def submit_job(request: SubmitRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
-    require_role(user, {"admin", "operator"})
-    enforce_submit_policy(request)
-
-    with tempfile.NamedTemporaryFile("w", suffix=".sbatch", prefix="d-aquila-", delete=False) as handle:
-        handle.write(request.script)
-        script_path = handle.name
-
-    try:
-        output = run_command(["sbatch", script_path])
-        audit("job.submit", user, {"name": request.name, "partition": request.partition, "cpu": request.cpu, "gpu": request.gpu}, "ok")
-        notify_event("job.submit", {"user": user, "name": request.name, "partition": request.partition})
-    finally:
-        try:
-            os.unlink(script_path)
-        except OSError:
-            pass
-
-    match = re.search(r"Submitted batch job (\S+)", output)
-    return {"submitted": True, "job_id": match.group(1) if match else None, "output": output.strip()}
+    require_permission(user, "jobs.submit")
+    return run_sbatch_request(request, user)
 
 
 @app.post("/api/jobs/{job_id}/cancel")
 def cancel_job(job_id: str, request: JobCancelRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
-    require_role(user, {"admin", "operator"})
+    require_permission(user, "jobs.cancel")
     if not re.match(r"^[A-Za-z0-9_.-]+$", job_id):
         raise HTTPException(status_code=400, detail="Invalid job id")
     output = run_command(["scancel", job_id])
@@ -1492,7 +1631,7 @@ def get_job_policy() -> dict[str, Any]:
 @app.post("/api/job-policy")
 def set_job_policy(request: JobPolicyRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
-    require_role(user, {"admin"})
+    require_permission(user, "jobs.policy.manage")
     policy = request.model_dump() if hasattr(request, "model_dump") else request.dict()
     policy["allowed_partitions"] = sorted(set(item.strip() for item in policy["allowed_partitions"] if item.strip()))
     RUNTIME_CONFIG["job_policy"] = policy
@@ -1510,7 +1649,7 @@ def get_prometheus_config() -> dict[str, Any]:
 @app.post("/api/prometheus/config")
 def set_prometheus_config(request: PrometheusConfigRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
-    require_role(user, {"admin", "operator"})
+    require_permission(user, "prometheus.manage")
     config = {
         "url": request.url.rstrip("/"),
         "node_targets": parse_target_lines(request.node_targets),
@@ -1528,7 +1667,7 @@ def set_prometheus_config(request: PrometheusConfigRequest, username: str = Cook
 @app.post("/api/prometheus/test")
 def test_prometheus_config(request: PrometheusConfigRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
-    require_role(user, {"admin", "operator"})
+    require_permission(user, "prometheus.manage")
     result = prometheus_test(request.url)
     audit("prometheus.test", user, {"url": request.url, "result": result}, "ok" if result["ok"] else "warn")
     return {"test": result}
@@ -1537,7 +1676,7 @@ def test_prometheus_config(request: PrometheusConfigRequest, username: str = Coo
 @app.post("/api/prometheus/apply")
 def apply_prometheus_config(username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
-    require_role(user, {"admin", "operator"})
+    require_permission(user, "prometheus.manage")
     config = RUNTIME_CONFIG.get("prometheus") or {"url": prometheus_base_url()}
     written = write_file_sd_config(config)
     reload_result = reload_prometheus()
@@ -1555,10 +1694,17 @@ def get_access_model(username: str = Cookie(default=None, alias=SESSION_COOKIE))
 @app.post("/api/access-model")
 def set_access_model(request: AccessModelRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
-    require_role(user, {"admin"})
+    require_permission(user, "access.manage")
     model = request.model_dump() if hasattr(request, "model_dump") else request.dict()
     for key, value in list(model.items()):
-        model[key] = sorted(set(item.strip() for item in value if item.strip()))
+        if key == "permissions":
+            model[key] = {
+                permission: sorted(set(role.strip() for role in roles if role.strip()))
+                for permission, roles in value.items()
+            }
+        else:
+            model[key] = sorted(set(item.strip() for item in value if item.strip()))
+    model["permissions"] = {**default_permission_matrix(), **(model.get("permissions") or {})}
     RUNTIME_CONFIG["access_model"] = model
     save_runtime_config()
     audit("access.update", user, model, "ok")
@@ -1573,7 +1719,7 @@ def get_job_templates() -> dict[str, Any]:
 @app.post("/api/job-templates")
 def save_job_template(request: JobTemplateRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
-    require_role(user, {"admin", "operator"})
+    require_permission(user, "templates.manage")
     template = request.model_dump() if hasattr(request, "model_dump") else request.dict()
     template["id"] = slug(template["name"])
     templates = [item for item in RUNTIME_CONFIG.get("job_templates", []) if item.get("id") != template["id"]]
@@ -1592,6 +1738,7 @@ def get_approvals() -> dict[str, Any]:
 @app.post("/api/approvals")
 def request_approval(request: ApprovalRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
+    require_permission(user, "approvals.request")
     template = next((item for item in RUNTIME_CONFIG.get("job_templates", []) if item.get("id") == request.template_id), None)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -1614,7 +1761,7 @@ def request_approval(request: ApprovalRequest, username: str = Cookie(default=No
 @app.post("/api/approvals/{approval_id}/decision")
 def decide_approval(approval_id: str, request: ApprovalDecisionRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
-    require_role(user, {"admin", "operator"})
+    require_permission(user, "approvals.decide")
     if request.action not in {"approve", "reject"}:
         raise HTTPException(status_code=400, detail="Action must be approve or reject")
     approvals = RUNTIME_CONFIG.get("approvals") or []
@@ -1627,6 +1774,20 @@ def decide_approval(approval_id: str, request: ApprovalDecisionRequest, username
     approval["reviewer"] = user
     approval["comment"] = request.comment
     approval["decided_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+    if request.action == "approve" and (RUNTIME_CONFIG.get("job_policy") or default_policy()).get("auto_submit_approved"):
+        template = next((item for item in RUNTIME_CONFIG.get("job_templates", []) if item.get("id") == approval.get("template_id")), None)
+        if template:
+            try:
+                submit_request = submit_request_from_template(template, approval.get("parameters") or {})
+                submit_result = run_sbatch_request(submit_request, user, "approval.auto_submit")
+                approval["status"] = "submitted"
+                approval["job_id"] = submit_result.get("job_id")
+                approval["submit_output"] = submit_result.get("output")
+                approval["submitted_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+                notify_event("approval.auto_submit", {**approval, "job_id": submit_result.get("job_id")})
+            except Exception as exc:
+                approval["auto_submit_error"] = str(exc)
+                audit("approval.auto_submit", user, {"approval_id": approval_id, "error": str(exc)}, "error")
     save_runtime_config()
     audit("approval.decision", user, {"approval_id": approval_id, "action": request.action}, "ok")
     notify_event("approval.decision", approval)
@@ -1641,11 +1802,11 @@ def get_facility_layout() -> dict[str, Any]:
 @app.post("/api/facility-layout")
 def set_facility_layout(request: FacilityLayoutRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
-    require_role(user, {"admin", "operator"})
+    require_permission(user, "facility.manage")
     layout = request.model_dump() if hasattr(request, "model_dump") else request.dict()
     RUNTIME_CONFIG["facility_layout"] = layout
     save_runtime_config()
-    audit("facility.update", user, {"rooms": len(layout.get("rooms", [])), "racks": len(layout.get("racks", []))}, "ok")
+    audit("facility.update", user, {"rooms": len(layout.get("rooms", [])), "racks": len(layout.get("racks", [])), "devices": len(layout.get("devices", []))}, "ok")
     return {"facility_layout": layout}
 
 
@@ -1657,20 +1818,20 @@ def get_alert_channels() -> dict[str, Any]:
 @app.post("/api/alert-channels")
 def set_alert_channels(request: AlertChannelsRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
-    require_role(user, {"admin", "operator"})
+    require_permission(user, "alerts.manage")
     channels = request.model_dump() if hasattr(request, "model_dump") else request.dict()
     channels["email_recipients"] = sorted(set(item.strip() for item in channels.get("email_recipients", []) if item.strip()))
     channels["enabled_events"] = sorted(set(item.strip() for item in channels.get("enabled_events", []) if item.strip()))
     RUNTIME_CONFIG["alert_channels"] = channels
     save_runtime_config()
-    audit("alerts.update", user, {"enabled_events": channels["enabled_events"], "webhook": bool(channels.get("webhook_url"))}, "ok")
+    audit("alerts.update", user, {"enabled_events": channels["enabled_events"], "webhook": bool(channels.get("webhook_url")), "slack": bool(channels.get("slack_webhook_url")), "teams": bool(channels.get("teams_webhook_url")), "smtp": bool(channels.get("smtp_host"))}, "ok")
     return {"alert_channels": channels}
 
 
 @app.post("/api/alert-channels/test")
 def test_alert_channels(username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
     user = session_user(username)
-    require_role(user, {"admin", "operator"})
+    require_permission(user, "alerts.manage")
     payload = {"message": "D-aquila alert channel test", "user": user, "time": datetime.now().astimezone().isoformat(timespec="seconds")}
     notify_event("alert.test", payload)
     audit("alerts.test", user, payload, "ok")

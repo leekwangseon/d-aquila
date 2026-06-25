@@ -489,6 +489,7 @@
                   <button class="ghost-action" type="button" id="hardwareMoveDown">아래로</button>
                   <button class="ghost-action" type="button" id="hardwareMoveUp">위로</button>
                   <button class="primary-action" type="button" id="hardwareApplyLayout">적용</button>
+                  <button class="ghost-action" type="button" id="hardwareSaveLayout">중앙 저장</button>
                 </div>
               </div>
               <div class="pdu-panel">
@@ -633,6 +634,7 @@
               <label>최대 메모리 GB<input id="policyMaxMemory" type="number" min="1" value="256" /></label>
               <label>최대 시간 h<input id="policyMaxTime" type="number" min="1" value="24" /></label>
               <label class="toggle-row"><input id="policyCustomScript" type="checkbox" checked /> 사용자 스크립트 허용</label>
+              <label class="toggle-row"><input id="policyAutoSubmitApproved" type="checkbox" /> 승인 후 자동 제출</label>
               <button class="primary-action" type="submit">정책 저장</button>
             </form>
           </section>
@@ -1062,6 +1064,7 @@
                 <label>Admin groups<input id="accessAdminGroups" placeholder="root,wheel" /></label>
                 <label>Operator groups<input id="accessOperatorGroups" placeholder="hpc-ops" /></label>
                 <label>Viewer groups<input id="accessViewerGroups" placeholder="hpc-users" /></label>
+                <label class="ops-wide">Permission matrix JSON<textarea id="accessPermissions" rows="8"></textarea></label>
                 <button class="primary-action" type="submit">권한 저장</button>
               </form>
             </article>
@@ -1098,6 +1101,8 @@
               <form class="ops-grid" id="facilityForm">
                 <label class="ops-wide">Rooms JSON<textarea id="facilityRooms" rows="5"></textarea></label>
                 <label class="ops-wide">Racks JSON<textarea id="facilityRacks" rows="5"></textarea></label>
+                <label class="ops-wide">Devices JSON<textarea id="facilityDevices" rows="5"></textarea></label>
+                <label class="ops-wide">PDU JSON<textarea id="facilityPdu" rows="4"></textarea></label>
                 <button class="primary-action" type="submit">배치 저장</button>
               </form>
               <div class="ops-list" id="facilitySummary"></div>
@@ -1112,6 +1117,14 @@
               </div>
               <form class="ops-grid" id="alertChannelForm">
                 <label class="ops-wide">Webhook URL<input id="alertWebhookUrl" placeholder="https://example.com/webhook" /></label>
+                <label class="ops-wide">Slack Webhook URL<input id="alertSlackWebhookUrl" placeholder="https://hooks.slack.com/services/..." /></label>
+                <label class="ops-wide">Teams Webhook URL<input id="alertTeamsWebhookUrl" placeholder="https://outlook.office.com/webhook/..." /></label>
+                <label>SMTP host<input id="alertSmtpHost" placeholder="smtp.example.com" /></label>
+                <label>SMTP port<input id="alertSmtpPort" type="number" min="1" max="65535" value="587" /></label>
+                <label>SMTP username<input id="alertSmtpUsername" placeholder="d-aquila@example.com" /></label>
+                <label>SMTP password<input id="alertSmtpPassword" type="password" autocomplete="new-password" /></label>
+                <label>SMTP from<input id="alertSmtpFrom" placeholder="d-aquila@example.com" /></label>
+                <label class="toggle-row"><input id="alertSmtpTls" type="checkbox" checked /> SMTP TLS 사용</label>
                 <label>Email recipients<input id="alertEmails" placeholder="ops@example.com" /></label>
                 <label>Enabled events<input id="alertEvents" placeholder="job.submit,job.cancel,approval.request,alert.test" /></label>
                 <div class="wizard-actions">

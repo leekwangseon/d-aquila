@@ -1445,7 +1445,8 @@ function renderHardwareView() {
     window.DAquilaHardware3D.update({
       nodes: latestNodes,
       system: latestSystem,
-      summary: latestSummary
+      summary: latestSummary,
+      facility: latestFacilityLayout
     });
   }
 }
@@ -1478,7 +1479,8 @@ function renderHardwareView() {
     window.DAquilaHardware3D.update({
       nodes: latestNodes,
       system: latestSystem,
-      summary: latestSummary
+      summary: latestSummary,
+      facility: latestFacilityLayout
     });
   }
 }
@@ -1721,6 +1723,7 @@ function renderJobPolicy(policy = {}) {
   setValue("#policyMaxMemory", policy.max_memory_gb ?? 256);
   setValue("#policyMaxTime", policy.max_time_hours ?? 24);
   setChecked("#policyCustomScript", policy.allow_custom_script !== false);
+  setChecked("#policyAutoSubmitApproved", !!policy.auto_submit_approved);
   setText("#policyStatusBadge", enabled ? "제출 허용" : "제출 차단");
 }
 
@@ -1814,6 +1817,10 @@ function renderAccessModel(data = {}) {
   setCsv("#accessAdminGroups", model.admin_groups);
   setCsv("#accessOperatorGroups", model.operator_groups);
   setCsv("#accessViewerGroups", model.viewer_groups);
+  const permissions = document.querySelector("#accessPermissions");
+  if (permissions && document.activeElement !== permissions) {
+    permissions.value = JSON.stringify(model.permissions || {}, null, 2);
+  }
 }
 
 function renderTemplates(data = {}) {
@@ -1859,13 +1866,17 @@ function renderFacilityLayout(data = {}) {
   latestFacilityLayout = layout;
   const roomsInput = document.querySelector("#facilityRooms");
   const racksInput = document.querySelector("#facilityRacks");
+  const devicesInput = document.querySelector("#facilityDevices");
+  const pduInput = document.querySelector("#facilityPdu");
   if (roomsInput && document.activeElement !== roomsInput) roomsInput.value = JSON.stringify(layout.rooms || [], null, 2);
   if (racksInput && document.activeElement !== racksInput) racksInput.value = JSON.stringify(layout.racks || [], null, 2);
+  if (devicesInput && document.activeElement !== devicesInput) devicesInput.value = JSON.stringify(layout.devices || [], null, 2);
+  if (pduInput && document.activeElement !== pduInput) pduInput.value = JSON.stringify(layout.pdu || {}, null, 2);
   const target = document.querySelector("#facilitySummary");
   if (target) {
     target.innerHTML = `
       <div class="ops-row">
-        <div><strong>${(layout.rooms || []).length} rooms</strong><small>${(layout.racks || []).length} racks configured</small></div>
+        <div><strong>${(layout.rooms || []).length} rooms</strong><small>${(layout.racks || []).length} racks / ${(layout.devices || []).length} devices configured</small></div>
       </div>
     `;
   }
@@ -1876,6 +1887,22 @@ function renderAlertChannels(data = {}) {
   latestAlertChannels = channels;
   const webhook = document.querySelector("#alertWebhookUrl");
   if (webhook && document.activeElement !== webhook) webhook.value = channels.webhook_url || "";
+  const slack = document.querySelector("#alertSlackWebhookUrl");
+  const teams = document.querySelector("#alertTeamsWebhookUrl");
+  const smtpHost = document.querySelector("#alertSmtpHost");
+  const smtpPort = document.querySelector("#alertSmtpPort");
+  const smtpUsername = document.querySelector("#alertSmtpUsername");
+  const smtpPassword = document.querySelector("#alertSmtpPassword");
+  const smtpFrom = document.querySelector("#alertSmtpFrom");
+  const smtpTls = document.querySelector("#alertSmtpTls");
+  if (slack && document.activeElement !== slack) slack.value = channels.slack_webhook_url || "";
+  if (teams && document.activeElement !== teams) teams.value = channels.teams_webhook_url || "";
+  if (smtpHost && document.activeElement !== smtpHost) smtpHost.value = channels.smtp_host || "";
+  if (smtpPort && document.activeElement !== smtpPort) smtpPort.value = channels.smtp_port || 587;
+  if (smtpUsername && document.activeElement !== smtpUsername) smtpUsername.value = channels.smtp_username || "";
+  if (smtpPassword && document.activeElement !== smtpPassword && channels.smtp_password) smtpPassword.value = channels.smtp_password || "";
+  if (smtpFrom && document.activeElement !== smtpFrom) smtpFrom.value = channels.smtp_from || "";
+  if (smtpTls) smtpTls.checked = channels.smtp_tls !== false;
   setCsv("#alertEmails", channels.email_recipients || []);
   setCsv("#alertEvents", channels.enabled_events || []);
 }
@@ -2126,6 +2153,29 @@ function switchView(view) {
 }
 
 window.addEventListener("d-aquila-hardware-ready", renderHardwareView);
+window.addEventListener("d-aquila-hardware-layout-change", async (event) => {
+  const detail = event.detail || {};
+  const layout = detail.layout || {};
+  const devices = Object.entries(layout).map(([name, value]) => ({
+    name,
+    node: name,
+    units: Number(value.units || 2),
+    startU: Number(value.startU || 1),
+    rackIndex: Number(value.rackIndex || 0),
+  }));
+  const payload = {
+    rooms: latestFacilityLayout?.rooms || [],
+    racks: latestFacilityLayout?.racks || [],
+    devices,
+    pdu: detail.pdu || latestFacilityLayout?.pdu || {}
+  };
+  try {
+    const result = await apiPost("/api/facility-layout", payload);
+    renderFacilityLayout(result);
+  } catch (error) {
+    console.warn("Failed to save hardware layout", error);
+  }
+});
 
 document.querySelector("#openSubmit").addEventListener("click", () => submitDialog.showModal());
 document.querySelector("#closeSubmit").addEventListener("click", () => submitDialog.close());
@@ -2187,7 +2237,8 @@ document.querySelector("#policyForm")?.addEventListener("submit", async (event) 
     max_gpu: Number(document.querySelector("#policyMaxGpu")?.value || 8),
     max_memory_gb: Number(document.querySelector("#policyMaxMemory")?.value || 256),
     max_time_hours: Number(document.querySelector("#policyMaxTime")?.value || 24),
-    allow_custom_script: !!document.querySelector("#policyCustomScript")?.checked
+    allow_custom_script: !!document.querySelector("#policyCustomScript")?.checked,
+    auto_submit_approved: !!document.querySelector("#policyAutoSubmitApproved")?.checked
   };
   try {
     const data = await apiPost("/api/job-policy", payload);
@@ -2254,15 +2305,16 @@ document.querySelector("#prometheusWizardForm")?.addEventListener("submit", asyn
 
 document.querySelector("#accessModelForm")?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const payload = {
-    admin_users: csvValue("#accessAdminUsers"),
-    operator_users: csvValue("#accessOperatorUsers"),
-    viewer_users: csvValue("#accessViewerUsers"),
-    admin_groups: csvValue("#accessAdminGroups"),
-    operator_groups: csvValue("#accessOperatorGroups"),
-    viewer_groups: csvValue("#accessViewerGroups")
-  };
   try {
+    const payload = {
+      admin_users: csvValue("#accessAdminUsers"),
+      operator_users: csvValue("#accessOperatorUsers"),
+      viewer_users: csvValue("#accessViewerUsers"),
+      admin_groups: csvValue("#accessAdminGroups"),
+      operator_groups: csvValue("#accessOperatorGroups"),
+      viewer_groups: csvValue("#accessViewerGroups"),
+      permissions: JSON.parse(document.querySelector("#accessPermissions")?.value || "{}")
+    };
     const result = await apiPost("/api/access-model", payload);
     renderAccessModel(result);
   } catch (error) {
@@ -2320,7 +2372,9 @@ document.querySelector("#facilityForm")?.addEventListener("submit", async (event
   try {
     const payload = {
       rooms: JSON.parse(document.querySelector("#facilityRooms")?.value || "[]"),
-      racks: JSON.parse(document.querySelector("#facilityRacks")?.value || "[]")
+      racks: JSON.parse(document.querySelector("#facilityRacks")?.value || "[]"),
+      devices: JSON.parse(document.querySelector("#facilityDevices")?.value || "[]"),
+      pdu: JSON.parse(document.querySelector("#facilityPdu")?.value || "{}")
     };
     const result = await apiPost("/api/facility-layout", payload);
     renderFacilityLayout(result);
@@ -2333,6 +2387,14 @@ document.querySelector("#alertChannelForm")?.addEventListener("submit", async (e
   event.preventDefault();
   const payload = {
     webhook_url: document.querySelector("#alertWebhookUrl")?.value || "",
+    slack_webhook_url: document.querySelector("#alertSlackWebhookUrl")?.value || "",
+    teams_webhook_url: document.querySelector("#alertTeamsWebhookUrl")?.value || "",
+    smtp_host: document.querySelector("#alertSmtpHost")?.value || "",
+    smtp_port: Number(document.querySelector("#alertSmtpPort")?.value || 587),
+    smtp_username: document.querySelector("#alertSmtpUsername")?.value || "",
+    smtp_password: document.querySelector("#alertSmtpPassword")?.value || "",
+    smtp_from: document.querySelector("#alertSmtpFrom")?.value || "",
+    smtp_tls: !!document.querySelector("#alertSmtpTls")?.checked,
     email_recipients: csvValue("#alertEmails"),
     enabled_events: csvValue("#alertEvents")
   };

@@ -1,5 +1,42 @@
 # D-aquila
 
+## 최신 운영 기능
+
+이번 버전에는 운영 클러스터 적용을 위한 다음 기능이 포함되어 있습니다.
+
+- 승인 후 자동 제출 정책: 기본값은 꺼짐이며, 설정 화면의 작업 제출 정책에서 켜면 승인된 템플릿 작업을 자동으로 `sbatch` 제출합니다.
+- SMTP/Slack/Teams 알림 채널: generic webhook, Slack incoming webhook, Teams webhook, SMTP 메일 전송을 지원합니다.
+- 다중 랙 3D 배치 편집기: 노드 수에 따라 여러 랙을 자동 배치하고, 서버별 U 크기와 시작 U, PDU 용량/할당 전력을 중앙 설정으로 저장합니다.
+- 사용자/그룹별 세부 권한 매트릭스: OS 사용자/그룹 기반 역할 위에 기능별 권한을 JSON matrix로 관리합니다.
+
+자동 제출은 실제 Slurm `sbatch`를 실행하는 기능입니다. 운영 환경에서는 테스트 파티션과 짧은 walltime 템플릿으로 먼저 검증한 뒤 활성화하세요.
+
+### 권한 매트릭스 기본 항목
+
+- `dashboard.view`
+- `jobs.view`
+- `jobs.submit`
+- `jobs.cancel`
+- `jobs.policy.manage`
+- `templates.manage`
+- `approvals.request`
+- `approvals.decide`
+- `prometheus.manage`
+- `facility.manage`
+- `alerts.manage`
+- `access.manage`
+
+### 알림 이벤트 예시
+
+- `job.submit`
+- `job.cancel`
+- `approval.request`
+- `approval.decision`
+- `approval.auto_submit`
+- `node.down`
+- `target.down`
+- `alert.test`
+
 D-aquila는 DASAN DATA HPC 환경을 위한 독립형 통합 관제 플랫폼입니다. Slurm 작업, CPU/GPU 자원, 노드 상태, Prometheus target, 전력, 온도, 로그, 하드웨어 랙 구성을 한 화면에서 조망하는 것을 목표로 합니다.
 
 `D`는 DASAN DATA를 뜻하고, `aquila`는 독수리를 뜻합니다. 클러스터와 서버 전체 상황을 하늘에서 내려다보듯 조망한다는 의미를 담고 있습니다.
