@@ -77,7 +77,10 @@ async function apiGet(path) {
       showLogin("세션이 만료되었습니다. 다시 로그인하세요.");
       throw new Error("Login required");
     }
-    if (!response.ok) throw new Error(`${path} returned ${response.status}`);
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.detail || `${path} returned ${response.status}`);
+    }
     return response.json();
   } finally {
     clearTimeout(timeout);
