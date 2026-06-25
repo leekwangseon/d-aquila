@@ -393,7 +393,7 @@ function buildRackFrame(parent, parts) {
   addSideLogos(parent, width, height);
   addRearPdu(parent, width, depth, height);
   addWheels(parent, width, depth, height);
-  addRackLabel(parent, label, [0, height / 2 + 0.16, frontZ + 0.02]);
+  addRackLabel(parent, label, [0, height / 2 - 0.34, frontZ + 0.16]);
 }
 
 function computePlacements(nodes) {
@@ -491,9 +491,16 @@ function addRoomLabel(parent, text, position, color) {
 }
 
 function addRackLabel(parent, text, position) {
-  const texture = createTextTexture(text, { width: 640, height: 160, background: "rgba(5,8,11,0.94)", color: "#f4f7fb", accent: 0xd95f43 });
+  const texture = createTextTexture(text, {
+    width: 640,
+    height: 160,
+    background: "rgba(5,8,11,0.9)",
+    color: "#f4f7fb",
+    accent: 0xd95f43,
+    font: "900 58px Arial, sans-serif"
+  });
   const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, toneMapped: false });
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.36, 0.34), material);
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.08, 0.27), material);
   mesh.position.set(...position);
   parent.add(mesh);
 }
@@ -502,14 +509,14 @@ function addHostnameLabel(parent, text, position, faceHeight) {
   const texture = createTextTexture(text, {
     width: 512,
     height: 128,
-    background: "rgba(7,12,16,0.86)",
+    background: "rgba(7,12,16,0.94)",
     color: "#ffffff",
     accent: 0x32a9c7,
-    font: "800 48px Arial, sans-serif"
+    font: "900 58px Arial, sans-serif"
   });
   const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, toneMapped: false });
-  const width = Math.min(0.56, Math.max(0.42, String(text).length * 0.055));
-  const height = Math.min(0.14, Math.max(0.07, faceHeight * 0.24));
+  const width = Math.min(0.9, Math.max(0.68, String(text).length * 0.082));
+  const height = Math.min(0.22, Math.max(0.13, faceHeight * 0.34));
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
   mesh.position.set(...position);
   parent.add(mesh);
@@ -783,7 +790,7 @@ function addServerFaceDetails(group, parts) {
   if (isGpu) {
     addBox(group, [rackWidth - 0.7, Math.max(safeHeight * 0.06, 0.018), 0.12], [0, y - safeHeight * 0.37, z + 0.1], createMaterial(COLORS.gpu, 0.32, 0.1), "gpu-accent-line");
   }
-  addHostnameLabel(group, node?.name || "server", [0, y + safeHeight * 0.34, z + 0.17], safeHeight);
+  addHostnameLabel(group, node?.name || "server", [0, y + safeHeight * 0.32, z + 0.2], safeHeight);
 }
 
 function addDriveBayLines(group, x, y, z, bayWidth, bayHeight, material) {
