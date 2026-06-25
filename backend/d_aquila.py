@@ -36,6 +36,7 @@ COMMAND_TIMEOUT = int(os.getenv("D_AQUILA_COMMAND_TIMEOUT", "10"))
 AUTH_MODE = os.getenv("D_AQUILA_AUTH_MODE", "pam").lower()
 AUTH_SHADOW_FALLBACK = os.getenv("D_AQUILA_AUTH_SHADOW_FALLBACK", "true").lower() in {"1", "true", "yes", "on"}
 AUTH_SESSION_SECONDS = int(os.getenv("D_AQUILA_AUTH_SESSION_SECONDS", "28800"))
+HOST_SLURM_FALLBACK = os.getenv("D_AQUILA_HOST_SLURM_FALLBACK", "true").lower() in {"1", "true", "yes", "on"}
 SESSION_COOKIE = "d_aquila_session"
 SESSIONS: dict[str, dict[str, Any]] = {}
 RUNTIME_CONFIG: dict[str, Any] = {}
@@ -454,23 +455,65 @@ def me(d_aquila_session: str | None = Cookie(default=None, alias=SESSION_COOKIE)
     }
 
 
+SLURM_COMMANDS = {"sinfo", "squeue", "scontrol", "sbatch", "scancel"}
+
+
+def run_subprocess(args: list[str], timeout: int | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        args,
+        check=False,
+        text=True,
+        capture_output=True,
+        timeout=timeout or COMMAND_TIMEOUT,
+    )
+
+
+def host_slurm_command(args: list[str]) -> list[str] | None:
+    if not HOST_SLURM_FALLBACK or not args or args[0] not in SLURM_COMMANDS:
+        return None
+    chroot = shutil.which("chroot") or "/usr/sbin/chroot"
+    if not Path(chroot).exists() and not shutil.which("chroot"):
+        return None
+    command = args[0]
+    for host_path in [f"/usr/bin/{command}", f"/usr/sbin/{command}", f"/bin/{command}", f"/sbin/{command}"]:
+        if Path("/host", host_path.lstrip("/")).exists():
+            return [chroot, "/host", host_path, *args[1:]]
+    return None
+
+
+def command_error(args: list[str], proc: subprocess.CompletedProcess[str]) -> HTTPException:
+    detail = proc.stderr.strip() or proc.stdout.strip() or f"exit code {proc.returncode}"
+    return HTTPException(status_code=502, detail=f"{args[0]} failed: {detail}")
+
+
 def run_command(args: list[str]) -> str:
     try:
-        proc = subprocess.run(
-            args,
-            check=False,
-            text=True,
-            capture_output=True,
-            timeout=COMMAND_TIMEOUT,
-        )
+        proc = run_subprocess(args)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=503, detail=f"Command not found: {args[0]}") from exc
+        fallback = host_slurm_command(args)
+        if not fallback:
+            raise HTTPException(status_code=503, detail=f"Command not found: {args[0]}") from exc
+        try:
+            host_proc = run_subprocess(fallback)
+        except (FileNotFoundError, subprocess.TimeoutExpired) as host_exc:
+            raise HTTPException(status_code=503, detail=f"Host Slurm fallback failed: {host_exc}") from host_exc
+        if host_proc.returncode != 0:
+            raise command_error(args, host_proc)
+        return host_proc.stdout
     except subprocess.TimeoutExpired as exc:
         raise HTTPException(status_code=504, detail=f"Command timed out: {' '.join(args)}") from exc
 
     if proc.returncode != 0:
-        detail = proc.stderr.strip() or proc.stdout.strip() or f"exit code {proc.returncode}"
-        raise HTTPException(status_code=502, detail=f"{args[0]} failed: {detail}")
+        fallback = host_slurm_command(args)
+        if fallback:
+            try:
+                host_proc = run_subprocess(fallback)
+            except (FileNotFoundError, subprocess.TimeoutExpired) as host_exc:
+                raise HTTPException(status_code=503, detail=f"Host Slurm fallback failed: {host_exc}") from host_exc
+            if host_proc.returncode == 0:
+                return host_proc.stdout
+            raise command_error(args, host_proc)
+        raise command_error(args, proc)
     return proc.stdout
 
 
@@ -960,6 +1003,7 @@ def discovery() -> dict[str, Any]:
         "runtime": {
             "disk_path": os.getenv("D_AQUILA_DISK_PATH", "/"),
             "command_timeout": COMMAND_TIMEOUT,
+            "host_slurm_fallback": HOST_SLURM_FALLBACK,
         },
     }
 

@@ -29,6 +29,7 @@ services:
       D_AQUILA_AUTH_MODE: ${D_AQUILA_AUTH_MODE:-pam}
       D_AQUILA_AUTH_SHADOW_FALLBACK: ${D_AQUILA_AUTH_SHADOW_FALLBACK:-true}
       D_AQUILA_AUTH_SESSION_SECONDS: ${D_AQUILA_AUTH_SESSION_SECONDS:-28800}
+      D_AQUILA_HOST_SLURM_FALLBACK: ${D_AQUILA_HOST_SLURM_FALLBACK:-true}
     volumes:
       - /:/host:ro
       - /etc/passwd:/etc/passwd:ro

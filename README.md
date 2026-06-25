@@ -232,6 +232,20 @@ D-aquila는 로그인 노드의 Slurm 명령을 사용합니다.
 - `sbatch`
 - `scancel`
 
+Docker 컨테이너에 포함된 Slurm client가 호스트의 Slurm controller와 버전 또는 OpenHPC/Rocky 계열 라이브러리 차이로 통신하지 못하는 경우가 있습니다. 예를 들어 컨테이너 안에서 `squeue` 실행 시 `slurm_load_jobs error: Zero Bytes were transmitted or received`가 발생할 수 있습니다.
+
+이를 위해 D-aquila는 기본적으로 컨테이너 Slurm client가 실패하면 호스트에 마운트된 실제 Slurm 명령을 `chroot /host` 방식으로 재시도합니다.
+
+```text
+D_AQUILA_HOST_SLURM_FALLBACK=true
+```
+
+이 방식은 `/`가 `/host`로 읽기 전용 마운트되어 있고, 호스트의 `/usr/bin/squeue`, `/usr/bin/sinfo`, `/usr/bin/scontrol` 등이 존재할 때 동작합니다. 운영 정책상 이 fallback을 끄려면 다음 값을 사용합니다.
+
+```bash
+export D_AQUILA_HOST_SLURM_FALLBACK=false
+```
+
 작업 제출은 정책 설정에서 허용해야 동작합니다. 정책에서는 다음 항목을 제한할 수 있습니다.
 
 - 제출 활성화 여부
