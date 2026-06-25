@@ -1911,7 +1911,15 @@ function ensureLocationMetric(system, site = {}) {
     grid.appendChild(card);
   }
   setText("#locationMetric", site.name || "위치 미설정");
-  setText("#locationDetailMetric", [site.facility, site.latitude && site.longitude ? `${site.latitude}, ${site.longitude}` : "", system?.hostname].filter(Boolean).join(" · ") || "D_AQUILA_SITE_NAME 설정 필요");
+  setText(
+    "#locationDetailMetric",
+    [
+      site.facility,
+      site.latitude && site.longitude ? `${site.latitude}, ${site.longitude}` : "",
+      site.source?.startsWith("auto") ? "public IP auto" : "",
+      system?.hostname,
+    ].filter(Boolean).join(" · ") || "자동 감지 실패 또는 위치 미설정"
+  );
 }
 
 function ensureResourceHeroMetrics() {

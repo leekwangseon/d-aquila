@@ -42,9 +42,11 @@ SITE_NAME = os.getenv("D_AQUILA_SITE_NAME", "")
 SITE_FACILITY = os.getenv("D_AQUILA_SITE_FACILITY", "")
 SITE_LATITUDE = os.getenv("D_AQUILA_SITE_LATITUDE", "")
 SITE_LONGITUDE = os.getenv("D_AQUILA_SITE_LONGITUDE", "")
+SITE_AUTO = os.getenv("D_AQUILA_SITE_AUTO", "true").lower() in {"1", "true", "yes", "on"}
 SESSION_COOKIE = "d_aquila_session"
 SESSIONS: dict[str, dict[str, Any]] = {}
 RUNTIME_CONFIG: dict[str, Any] = {}
+SITE_CACHE: dict[str, Any] = {"expires_at": 0.0, "value": None}
 
 
 app = FastAPI(title="D-aquila API", version="0.1.0")
@@ -638,6 +640,79 @@ def local_ip() -> str | None:
         return None
 
 
+def configured_site_location() -> dict[str, str]:
+    return {
+        "name": SITE_NAME,
+        "facility": SITE_FACILITY,
+        "latitude": SITE_LATITUDE,
+        "longitude": SITE_LONGITUDE,
+        "source": "configured" if any([SITE_NAME, SITE_FACILITY, SITE_LATITUDE, SITE_LONGITUDE]) else "",
+    }
+
+
+def site_location() -> dict[str, str]:
+    configured = configured_site_location()
+    if configured["source"] or not SITE_AUTO:
+        return configured
+    now = time.time()
+    if SITE_CACHE.get("value") and float(SITE_CACHE.get("expires_at", 0)) > now:
+        return SITE_CACHE["value"]
+
+    detected = detect_public_ip_location()
+    SITE_CACHE["value"] = detected
+    SITE_CACHE["expires_at"] = now + 6 * 60 * 60
+    return detected
+
+
+def detect_public_ip_location() -> dict[str, str]:
+    providers = [
+        ("https://ipapi.co/json/", parse_ipapi_location),
+        ("http://ip-api.com/json/?fields=status,message,country,regionName,city,lat,lon,query,org", parse_ip_api_location),
+    ]
+    for url, parser in providers:
+        try:
+            with urllib.request.urlopen(url, timeout=min(COMMAND_TIMEOUT, 3)) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            parsed = parser(payload)
+            if parsed.get("name"):
+                return parsed
+        except Exception:
+            continue
+    return {"name": "", "facility": "", "latitude": "", "longitude": "", "source": "unavailable"}
+
+
+def parse_ipapi_location(payload: dict[str, Any]) -> dict[str, str]:
+    city = str(payload.get("city") or "")
+    region = str(payload.get("region") or payload.get("region_code") or "")
+    country = str(payload.get("country_name") or payload.get("country") or "")
+    name = ", ".join(part for part in [city, region, country] if part)
+    return {
+        "name": name,
+        "facility": str(payload.get("org") or payload.get("asn") or ""),
+        "latitude": str(payload.get("latitude") or ""),
+        "longitude": str(payload.get("longitude") or ""),
+        "public_ip": str(payload.get("ip") or ""),
+        "source": "auto-ipapi",
+    }
+
+
+def parse_ip_api_location(payload: dict[str, Any]) -> dict[str, str]:
+    if payload.get("status") == "fail":
+        return {"name": "", "facility": "", "latitude": "", "longitude": "", "source": "unavailable"}
+    city = str(payload.get("city") or "")
+    region = str(payload.get("regionName") or "")
+    country = str(payload.get("country") or "")
+    name = ", ".join(part for part in [city, region, country] if part)
+    return {
+        "name": name,
+        "facility": str(payload.get("org") or ""),
+        "latitude": str(payload.get("lat") or ""),
+        "longitude": str(payload.get("lon") or ""),
+        "public_ip": str(payload.get("query") or ""),
+        "source": "auto-ip-api",
+    }
+
+
 def read_os_release() -> dict[str, str]:
     for path in [Path("/host/etc/os-release"), Path("/etc/os-release")]:
         if not path.exists():
@@ -1093,12 +1168,7 @@ def summary() -> dict[str, Any]:
         "max_gpu_temp_celsius": prom_value("max(DCGM_FI_DEV_GPU_TEMP)"),
         "gpu_power_watts": prom_value("sum(DCGM_FI_DEV_POWER_USAGE)"),
         "ipmi_up": prom_value('sum(up{job="ipmi"})'),
-        "site": {
-            "name": SITE_NAME,
-            "facility": SITE_FACILITY,
-            "latitude": SITE_LATITUDE,
-            "longitude": SITE_LONGITUDE,
-        },
+        "site": site_location(),
     }
 
 
