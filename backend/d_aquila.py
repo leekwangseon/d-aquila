@@ -844,17 +844,32 @@ def detect_public_ip_location() -> dict[str, str]:
     return {"name": "", "facility": "", "latitude": "", "longitude": "", "source": "unavailable"}
 
 
+def normalized_auto_site_name(city: str, region: str, country: str) -> str:
+    city_clean = city.strip()
+    region_clean = region.strip()
+    country_clean = country.strip()
+    city_lower = city_clean.lower()
+    if region_clean and (city_lower.endswith("-dong") or city_lower.endswith(" dong") or city_lower.endswith("dong")):
+        city_clean = ""
+    parts = []
+    for part in [city_clean, region_clean, country_clean]:
+        if part and part not in parts:
+            parts.append(part)
+    return ", ".join(parts)
+
+
 def parse_ipapi_location(payload: dict[str, Any]) -> dict[str, str]:
     city = str(payload.get("city") or "")
     region = str(payload.get("region") or payload.get("region_code") or "")
     country = str(payload.get("country_name") or payload.get("country") or "")
-    name = ", ".join(part for part in [city, region, country] if part)
+    name = normalized_auto_site_name(city, region, country)
     return {
         "name": name,
-        "facility": str(payload.get("org") or payload.get("asn") or ""),
+        "facility": "",
         "latitude": str(payload.get("latitude") or ""),
         "longitude": str(payload.get("longitude") or ""),
         "public_ip": str(payload.get("ip") or ""),
+        "network_org": str(payload.get("org") or payload.get("asn") or ""),
         "source": "auto-ipapi",
     }
 
@@ -865,13 +880,14 @@ def parse_ip_api_location(payload: dict[str, Any]) -> dict[str, str]:
     city = str(payload.get("city") or "")
     region = str(payload.get("regionName") or "")
     country = str(payload.get("country") or "")
-    name = ", ".join(part for part in [city, region, country] if part)
+    name = normalized_auto_site_name(city, region, country)
     return {
         "name": name,
-        "facility": str(payload.get("org") or ""),
+        "facility": "",
         "latitude": str(payload.get("lat") or ""),
         "longitude": str(payload.get("lon") or ""),
         "public_ip": str(payload.get("query") or ""),
+        "network_org": str(payload.get("org") or ""),
         "source": "auto-ip-api",
     }
 

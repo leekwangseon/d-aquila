@@ -12,6 +12,7 @@ D-aquila에는 OpenManage Enterprise에서 기대하는 장비 운영 기능을 
 - 자동화 액션: target down, temperature high, approval approved 같은 이벤트에 대해 notify, submit_if_policy_allows 같은 후속 조치를 정의합니다.
 - 관리자 고급 설정: 위 항목은 `generated/d-aquila-config.json`에 저장되며 관리자 화면에서 JSON으로 편집할 수 있습니다.
 - 관리자 권한: 수명주기 설정 저장은 `admin.manage` 권한을 가진 관리자만 수행할 수 있습니다.
+- 물리 위치 자동 감지: 기본값은 공인 IP 기반 지리 위치이며 실제 서버실 주소가 아닐 수 있습니다. 동 단위처럼 과도하게 세부적인 자동 추정값은 도시/국가 수준으로 완화해서 표시합니다.
 
 ## 최신 운영 기능
 
