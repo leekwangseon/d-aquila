@@ -1,5 +1,29 @@
 # D-aquila
 
+## Windows 단일 설치 파일 배포
+
+최종 사용자는 GitHub Releases에서 `D-aquila-Windows-Setup.exe` 파일 하나만 다운로드하면 됩니다.
+
+1. `D-aquila-Windows-Setup.exe` 더블클릭
+2. 설치 위치 확인
+3. 바탕화면/시작 메뉴 아이콘 선택
+4. 설치
+5. 설치 완료 후 D-aquila Windows Edition 자동 실행
+
+이 단일 EXE 안에 설치 마법사와 D-aquila 실행 런처가 함께 들어 있습니다. 사용자는 Python, PowerShell 스크립트, Inno Setup 같은 별도 도구를 설치할 필요가 없습니다.
+
+배포자는 Windows 빌드 PC에서 다음 명령으로 GitHub Release용 단일 설치 파일을 만듭니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\package-windows-setup.ps1
+```
+
+완료 후 생성되는 파일:
+
+```text
+dist\release\D-aquila-Windows-Setup.exe
+```
+
 ## 관리자 콘솔 및 장비 수명주기 관리
 
 D-aquila에는 OpenManage Enterprise에서 기대하는 장비 운영 기능을 D-aquila 방식으로 통합한 관리자 콘솔이 추가되었습니다.
@@ -71,19 +95,17 @@ dist\D-aquila-Windows\D-aquila-Windows.exe
 
 ### Windows 설치 마법사 만들기
 
-일반 Windows 프로그램처럼 `Setup.exe`를 더블클릭해서 다음, 다음, 설치하는 배포 파일도 만들 수 있습니다. 이 방식은 Inno Setup 6이 설치된 Windows 빌드 PC에서 실행합니다.
-
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\package-windows-installer.ps1 -Version 0.1.0
+powershell -ExecutionPolicy Bypass -File .\scripts\package-windows-setup.ps1
 ```
 
 완료 후 다음 설치 파일이 생성됩니다.
 
 ```text
-dist\installer\D-aquila-Windows-Setup.exe
+dist\release\D-aquila-Windows-Setup.exe
 ```
 
-사용자는 이 파일을 더블클릭해서 설치 마법사를 진행하면 됩니다. 설치 후 시작 메뉴와 선택한 경우 바탕화면 아이콘에서 D-aquila Windows Edition을 실행할 수 있습니다.
+사용자는 이 파일 하나만 더블클릭해서 설치 마법사를 진행하면 됩니다. 설치 후 시작 메뉴와 선택한 경우 바탕화면 아이콘에서 D-aquila Windows Edition을 실행할 수 있습니다. Inno Setup은 선택적 대안 빌드에만 사용하며, 기본 배포 방식에는 필요하지 않습니다.
 
 - 승인 후 자동 제출 정책: 기본값은 꺼짐이며, 설정 화면의 작업 제출 정책에서 켜면 승인된 템플릿 작업을 자동으로 `sbatch` 제출합니다.
 - SMTP/Slack/Teams 알림 채널: generic webhook, Slack incoming webhook, Teams webhook, SMTP 메일 전송을 지원합니다.
