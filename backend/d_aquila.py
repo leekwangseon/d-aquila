@@ -15,7 +15,7 @@ import urllib.request
 import shutil
 import socket
 import urllib.error
-from datetime import datetime
+from datetime import date, datetime
 from email.message import EmailMessage
 from pathlib import Path
 import smtplib
@@ -163,6 +163,14 @@ class AlertChannelsRequest(BaseModel):
     enabled_events: list[str] = Field(default_factory=list)
 
 
+class AdminLifecycleRequest(BaseModel):
+    firmware_baseline: dict[str, Any] = Field(default_factory=dict)
+    warranty_inventory: list[dict[str, Any]] = Field(default_factory=list)
+    power_profiles: list[dict[str, Any]] = Field(default_factory=list)
+    compliance_rules: list[dict[str, Any]] = Field(default_factory=list)
+    automation_actions: list[dict[str, Any]] = Field(default_factory=list)
+
+
 def default_policy() -> dict[str, Any]:
     return {
         "enabled": ENABLE_SUBMIT,
@@ -190,6 +198,7 @@ def default_permission_matrix() -> dict[str, list[str]]:
         "facility.manage": ["admin", "operator"],
         "alerts.manage": ["admin"],
         "access.manage": ["admin"],
+        "admin.manage": ["admin"],
     }
 
 
@@ -266,6 +275,35 @@ def default_alert_channels() -> dict[str, Any]:
     }
 
 
+def default_admin_lifecycle() -> dict[str, Any]:
+    return {
+        "firmware_baseline": {
+            "bios": "",
+            "bmc": "",
+            "nvidia_driver": "",
+            "cuda": "",
+            "kernel": "",
+            "note": "Set desired versions to compare hardware compliance.",
+        },
+        "warranty_inventory": [],
+        "power_profiles": [
+            {"name": "Balanced", "cap_watts": 0, "description": "Default operating profile"},
+            {"name": "Performance", "cap_watts": 0, "description": "Prefer maximum throughput"},
+            {"name": "Eco", "cap_watts": 0, "description": "Prefer lower power and temperature"},
+        ],
+        "compliance_rules": [
+            {"id": "prometheus-targets-up", "name": "Exporter targets must be up", "enabled": True},
+            {"id": "ipmi-visible", "name": "IPMI telemetry should be visible", "enabled": True},
+            {"id": "audit-enabled", "name": "Audit log must be retained", "enabled": True},
+        ],
+        "automation_actions": [
+            {"name": "Target down triage", "trigger": "target.down", "action": "notify"},
+            {"name": "Thermal warning", "trigger": "temperature.high", "action": "notify"},
+            {"name": "Approval auto-submit", "trigger": "approval.approved", "action": "submit_if_policy_allows"},
+        ],
+    }
+
+
 def load_runtime_config() -> dict[str, Any]:
     GENERATED_DIR.mkdir(parents=True, exist_ok=True)
     if not CONFIG_PATH.exists():
@@ -277,6 +315,7 @@ def load_runtime_config() -> dict[str, Any]:
             "approvals": [],
             "facility_layout": default_facility_layout(),
             "alert_channels": default_alert_channels(),
+            "admin_lifecycle": default_admin_lifecycle(),
         }
     try:
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
@@ -290,6 +329,7 @@ def load_runtime_config() -> dict[str, Any]:
         "approvals": data.get("approvals") or [],
         "facility_layout": {**default_facility_layout(), **(data.get("facility_layout") or {})},
         "alert_channels": {**default_alert_channels(), **(data.get("alert_channels") or {})},
+        "admin_lifecycle": {**default_admin_lifecycle(), **(data.get("admin_lifecycle") or {})},
     }
 
 
@@ -1836,6 +1876,124 @@ def test_alert_channels(username: str = Cookie(default=None, alias=SESSION_COOKI
     notify_event("alert.test", payload)
     audit("alerts.test", user, payload, "ok")
     return {"sent": True}
+
+
+@app.get("/api/admin")
+def admin_console(username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
+    user = session_user(username)
+    require_permission(user, "dashboard.view")
+    lifecycle = RUNTIME_CONFIG.get("admin_lifecycle") or default_admin_lifecycle()
+    node_rows = []
+    target_rows = []
+    ipmi_rows = []
+    log_summary: dict[str, Any] = {}
+    try:
+        node_rows = nodes().get("nodes", [])
+    except Exception:
+        node_rows = []
+    try:
+        target_rows = targets().get("targets", [])
+    except Exception:
+        target_rows = []
+    try:
+        ipmi_rows = ipmi_details().get("sensors", [])
+    except Exception:
+        ipmi_rows = []
+    try:
+        log_summary = logs(limit=120).get("summary", {})
+    except Exception:
+        log_summary = {}
+
+    total_nodes = len(node_rows)
+    gpu_nodes = sum(1 for node in node_rows if float(node.get("gpu_total") or 0) > 0)
+    down_nodes = sum(1 for node in node_rows if "down" in str(node.get("state") or "").lower())
+    drained_nodes = sum(1 for node in node_rows if "drain" in str(node.get("state") or "").lower())
+    target_down = sum(1 for target in target_rows if target.get("health") != "up")
+    ipmi_visible = sum(1 for target in target_rows if "ipmi" in str(target.get("job") or "").lower() and target.get("health") == "up")
+    hardware_events = int(log_summary.get("hardware") or 0)
+    security_events = int(log_summary.get("security") or 0)
+
+    compliance = []
+    for rule in lifecycle.get("compliance_rules", []):
+        rule_id = rule.get("id")
+        enabled = rule.get("enabled", True)
+        status = "disabled"
+        detail = "Rule disabled"
+        if enabled and rule_id == "prometheus-targets-up":
+            status = "ok" if target_down == 0 else "warn"
+            detail = f"{target_down} target down"
+        elif enabled and rule_id == "ipmi-visible":
+            status = "ok" if ipmi_visible > 0 else "warn"
+            detail = f"{ipmi_visible} IPMI targets up"
+        elif enabled and rule_id == "audit-enabled":
+            status = "ok" if AUDIT_LOG_PATH.exists() else "warn"
+            detail = str(AUDIT_LOG_PATH)
+        elif enabled:
+            status = "observe"
+            detail = "Custom rule"
+        compliance.append({**rule, "status": status, "detail": detail})
+
+    firmware = lifecycle.get("firmware_baseline") or {}
+    baseline_items = [
+        {"name": "BIOS", "desired": firmware.get("bios") or "not set", "source": "manual baseline"},
+        {"name": "BMC/iDRAC", "desired": firmware.get("bmc") or "not set", "source": "manual baseline"},
+        {"name": "NVIDIA Driver", "desired": firmware.get("nvidia_driver") or "not set", "source": "manual baseline"},
+        {"name": "CUDA", "desired": firmware.get("cuda") or "not set", "source": "manual baseline"},
+        {"name": "Kernel", "desired": firmware.get("kernel") or platform.release(), "source": "host kernel"},
+    ]
+
+    service_inventory = lifecycle.get("warranty_inventory") or []
+    warranty_expiring = 0
+    today = date.today()
+    for item in service_inventory:
+        try:
+            expires = date.fromisoformat(str(item.get("expires") or ""))
+        except ValueError:
+            continue
+        if 0 <= (expires - today).days <= 90:
+            warranty_expiring += 1
+
+    return {
+        "summary": {
+            "managed_nodes": total_nodes,
+            "gpu_nodes": gpu_nodes,
+            "down_nodes": down_nodes,
+            "drained_nodes": drained_nodes,
+            "target_down": target_down,
+            "ipmi_targets_up": ipmi_visible,
+            "hardware_events": hardware_events,
+            "security_events": security_events,
+            "warranty_expiring_90d": warranty_expiring,
+        },
+        "lifecycle": lifecycle,
+        "firmware": baseline_items,
+        "compliance": compliance,
+        "automation_actions": lifecycle.get("automation_actions", []),
+        "power_profiles": lifecycle.get("power_profiles", []),
+        "warranty_inventory": service_inventory,
+        "sensor_preview": ipmi_rows[:12],
+    }
+
+
+@app.post("/api/admin")
+def set_admin_console(request: AdminLifecycleRequest, username: str = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, Any]:
+    user = session_user(username)
+    require_permission(user, "admin.manage")
+    lifecycle = request.model_dump() if hasattr(request, "model_dump") else request.dict()
+    RUNTIME_CONFIG["admin_lifecycle"] = lifecycle
+    save_runtime_config()
+    audit(
+        "admin.lifecycle.update",
+        user,
+        {
+            "warranty": len(lifecycle.get("warranty_inventory", [])),
+            "profiles": len(lifecycle.get("power_profiles", [])),
+            "rules": len(lifecycle.get("compliance_rules", [])),
+            "actions": len(lifecycle.get("automation_actions", [])),
+        },
+        "ok",
+    )
+    return admin_console(username)
 
 
 app.mount("/", StaticFiles(directory=ROOT, html=True), name="static")

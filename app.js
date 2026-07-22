@@ -18,6 +18,7 @@ let latestTemplates = [];
 let latestApprovals = [];
 let latestFacilityLayout = null;
 let latestAlertChannels = null;
+let latestAdminConsole = null;
 let loadHistory = [];
 let powerHistory = [];
 let graphHistory = [];
@@ -1907,6 +1908,102 @@ function renderAlertChannels(data = {}) {
   setCsv("#alertEvents", channels.enabled_events || []);
 }
 
+function setJsonInput(selector, value) {
+  const element = document.querySelector(selector);
+  if (element && document.activeElement !== element) element.value = JSON.stringify(value ?? {}, null, 2);
+}
+
+function adminStatusClass(status = "") {
+  const lowered = String(status).toLowerCase();
+  if (["ok", "healthy", "pass"].includes(lowered)) return "ok";
+  if (["warn", "warning", "observe"].includes(lowered)) return "warn";
+  if (["disabled"].includes(lowered)) return "muted";
+  return "info";
+}
+
+function renderAdminRows(selector, rows = [], emptyText = "표시할 데이터가 없습니다.") {
+  const target = document.querySelector(selector);
+  if (!target) return;
+  target.innerHTML = rows.length
+    ? rows.map((row) => `
+        <div class="admin-row ${adminStatusClass(row.status)}">
+          <span class="admin-row-dot"></span>
+          <div>
+            <strong>${escapeHtml(row.title || row.name || row.id || "-")}</strong>
+            <small>${escapeHtml(row.detail || row.description || row.source || "")}</small>
+          </div>
+          <b>${escapeHtml(row.value || row.desired || row.status || "")}</b>
+        </div>
+      `).join("")
+    : `<div class="empty-inline"><strong>${escapeHtml(emptyText)}</strong><span>관리 데이터가 연결되면 자동으로 표시됩니다.</span></div>`;
+}
+
+function renderAdminConsole(data = {}) {
+  latestAdminConsole = data || {};
+  const summary = data.summary || {};
+  const lifecycle = data.lifecycle || {};
+  const managed = Number(summary.managed_nodes || 0);
+  const gpuNodes = Number(summary.gpu_nodes || 0);
+  const risk = Number(summary.down_nodes || 0) + Number(summary.drained_nodes || 0);
+  setText("#adminManagedNodes", managed ? `${managed}` : "-");
+  setText("#adminManagedDetail", `${gpuNodes} GPU nodes · ${summary.ipmi_targets_up || 0} IPMI up`);
+  setText("#adminNodeMetric", managed ? `${managed}` : "-");
+  setText("#adminNodeDetail", `${gpuNodes} GPU / ${Math.max(managed - gpuNodes, 0)} CPU or login`);
+  setText("#adminRiskMetric", String(risk));
+  setText("#adminRiskDetail", `${summary.down_nodes || 0} down · ${summary.drained_nodes || 0} drain`);
+  setText("#adminTargetMetric", String(summary.target_down || 0));
+  setText("#adminWarrantyMetric", String(summary.warranty_expiring_90d || 0));
+  setText("#adminIpmiMetric", String(summary.ipmi_targets_up || 0));
+
+  renderAdminRows("#adminComplianceList", (data.compliance || []).map((item) => ({
+    title: item.name || item.id,
+    detail: item.detail,
+    value: item.status,
+    status: item.status
+  })), "준수 규칙 없음");
+
+  renderAdminRows("#adminFirmwareList", (data.firmware || []).map((item) => ({
+    title: item.name,
+    detail: item.source,
+    value: item.desired,
+    status: item.desired && item.desired !== "not set" ? "ok" : "observe"
+  })), "펌웨어 기준 없음");
+
+  renderAdminRows("#adminWarrantyList", (data.warranty_inventory || []).map((item) => ({
+    title: item.node || item.service_tag || item.asset || "asset",
+    detail: [item.service_tag, item.vendor, item.model].filter(Boolean).join(" · "),
+    value: item.expires || "-",
+    status: item.expires ? "ok" : "observe"
+  })), "보증 정보 없음");
+
+  renderAdminRows("#adminPowerProfiles", (data.power_profiles || []).map((item) => ({
+    title: item.name,
+    detail: item.description,
+    value: Number(item.cap_watts || 0) > 0 ? `${item.cap_watts} W` : "no cap",
+    status: "info"
+  })), "전원 프로파일 없음");
+
+  renderAdminRows("#adminAutomationList", (data.automation_actions || []).map((item) => ({
+    title: item.name,
+    detail: item.trigger,
+    value: item.action,
+    status: "ok"
+  })), "자동화 액션 없음");
+
+  renderAdminRows("#adminSensorPreview", (data.sensor_preview || []).map((item) => ({
+    title: item.name || item.sensor || item.instance || "sensor",
+    detail: item.instance || item.job || "",
+    value: item.value !== undefined ? String(item.value) : "",
+    status: "info"
+  })), "센서 데이터 없음");
+
+  setJsonInput("#adminFirmwareBaseline", lifecycle.firmware_baseline || {});
+  setJsonInput("#adminWarrantyInventory", lifecycle.warranty_inventory || []);
+  setJsonInput("#adminPowerProfileInput", lifecycle.power_profiles || []);
+  setJsonInput("#adminComplianceRules", lifecycle.compliance_rules || []);
+  setJsonInput("#adminAutomationActions", lifecycle.automation_actions || []);
+}
+
 function ensureLocationMetric(system) {
   const grid = document.querySelector('.status-grid[aria-label="Operations summary"]');
   if (!grid) return;
@@ -2088,7 +2185,7 @@ ${body}`;
 }
 
 async function refreshData() {
-  const [summary, system, nodeData, jobData, targetData, discoveryData, logData, ipmiData, auditData, policyData, promConfigData, accessData, templateData, approvalData, facilityData, alertData] = await Promise.all([
+  const [summary, system, nodeData, jobData, targetData, discoveryData, logData, ipmiData, auditData, policyData, promConfigData, accessData, templateData, approvalData, facilityData, alertData, adminData] = await Promise.all([
     loadOptional("/api/summary", {}),
     loadOptional("/api/system", {}),
     loadOptional("/api/nodes", { nodes: [] }),
@@ -2104,7 +2201,8 @@ async function refreshData() {
     loadOptional("/api/job-templates", { templates: [] }),
     loadOptional("/api/approvals", { approvals: [] }),
     loadOptional("/api/facility-layout", { facility_layout: {} }),
-    loadOptional("/api/alert-channels", { alert_channels: {} })
+    loadOptional("/api/alert-channels", { alert_channels: {} }),
+    loadOptional("/api/admin", { summary: {}, lifecycle: {}, firmware: [], compliance: [], automation_actions: [], power_profiles: [], warranty_inventory: [], sensor_preview: [] })
   ]);
 
   latestSummary = summary.unavailable ? null : summary;
@@ -2136,6 +2234,7 @@ async function refreshData() {
   renderApprovals(approvalData);
   renderFacilityLayout(facilityData);
   renderAlertChannels(alertData);
+  renderAdminConsole(adminData);
 
   const connected = !summary.unavailable || !system.unavailable || !nodeData.unavailable || !jobData.unavailable || !targetData.unavailable || !discoveryData.unavailable || !logData.unavailable || !ipmiData.unavailable;
   setApiState(connected ? "Live API" : "No API", connected);
@@ -2145,7 +2244,7 @@ function switchView(view) {
   document.querySelectorAll(".view").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.viewPanel === view);
   });
-  viewTitle.textContent = viewTitles[view] || "D-aquila";
+  viewTitle.textContent = view === "admin" ? "관리자 콘솔" : viewTitles[view] || "D-aquila";
   document.querySelector(".main").scrollTop = 0;
   if (view === "hardware") {
     requestAnimationFrame(renderHardwareView);
@@ -2403,6 +2502,25 @@ document.querySelector("#alertChannelForm")?.addEventListener("submit", async (e
     renderAlertChannels(result);
   } catch (error) {
     alert(`알림 저장 실패: ${error.message}`);
+  }
+});
+
+document.querySelector("#adminLifecycleForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const payload = {
+      firmware_baseline: JSON.parse(document.querySelector("#adminFirmwareBaseline")?.value || "{}"),
+      warranty_inventory: JSON.parse(document.querySelector("#adminWarrantyInventory")?.value || "[]"),
+      power_profiles: JSON.parse(document.querySelector("#adminPowerProfileInput")?.value || "[]"),
+      compliance_rules: JSON.parse(document.querySelector("#adminComplianceRules")?.value || "[]"),
+      automation_actions: JSON.parse(document.querySelector("#adminAutomationActions")?.value || "[]")
+    };
+    const result = await apiPost("/api/admin", payload);
+    renderAdminConsole(result);
+    setText("#adminSaveStatus", "저장됨");
+  } catch (error) {
+    setText("#adminSaveStatus", "오류");
+    alert(`관리자 설정 저장 실패: ${error.message}`);
   }
 });
 

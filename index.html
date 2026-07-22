@@ -71,6 +71,10 @@
             <span class="icon">L</span>
             <span>로그</span>
           </button>
+          <button class="nav-item" type="button" data-view="admin">
+            <span class="icon">A</span>
+            <span>관리자</span>
+          </button>
           <button class="nav-item" type="button" data-view="settings">
             <span class="icon">S</span>
             <span>설정</span>
@@ -973,6 +977,111 @@
                 <div class="audit-list" id="auditLogList"></div>
               </article>
             </aside>
+          </section>
+        </section>
+
+        <section class="view" data-view-panel="admin">
+          <section class="admin-console">
+            <article class="panel admin-hero-panel">
+              <div>
+                <p class="eyebrow">Enterprise administration</p>
+                <h2>D-aquila 관리자 콘솔</h2>
+                <p>자산, 펌웨어 기준, 보증, 전원 프로파일, 규정 준수, 자동화 액션을 한곳에서 관리합니다.</p>
+              </div>
+              <div class="admin-hero-score">
+                <span>Managed Estate</span>
+                <strong id="adminManagedNodes">-</strong>
+                <small id="adminManagedDetail">nodes / targets / telemetry</small>
+              </div>
+            </article>
+
+            <section class="admin-metric-grid" aria-label="Admin summary">
+              <article class="metric admin-metric blue"><span class="metric-label">관리 노드</span><strong id="adminNodeMetric">-</strong><small id="adminNodeDetail">cluster inventory</small></article>
+              <article class="metric admin-metric red"><span class="metric-label">장애/Drain</span><strong id="adminRiskMetric">-</strong><small id="adminRiskDetail">nodes requiring attention</small></article>
+              <article class="metric admin-metric amber"><span class="metric-label">Target Down</span><strong id="adminTargetMetric">-</strong><small>Prometheus scrape health</small></article>
+              <article class="metric admin-metric violet"><span class="metric-label">서비스 만료 90일</span><strong id="adminWarrantyMetric">-</strong><small>warranty inventory</small></article>
+              <article class="metric admin-metric green"><span class="metric-label">IPMI 가시성</span><strong id="adminIpmiMetric">-</strong><small>power / thermal telemetry</small></article>
+            </section>
+
+            <section class="admin-grid">
+              <article class="panel admin-panel">
+                <div class="panel-header compact">
+                  <div>
+                    <h2>수명주기 준수 상태</h2>
+                    <p>펌웨어, 계측, 감사, exporter 상태를 운영 기준과 비교합니다.</p>
+                  </div>
+                </div>
+                <div class="admin-list" id="adminComplianceList"></div>
+              </article>
+
+              <article class="panel admin-panel">
+                <div class="panel-header compact">
+                  <div>
+                    <h2>펌웨어 / 드라이버 기준</h2>
+                    <p>BIOS, BMC/iDRAC, GPU 드라이버, CUDA, 커널 기준 버전을 관리합니다.</p>
+                  </div>
+                </div>
+                <div class="admin-list" id="adminFirmwareList"></div>
+              </article>
+
+              <article class="panel admin-panel">
+                <div class="panel-header compact">
+                  <div>
+                    <h2>보증 / 서비스 태그</h2>
+                    <p>장비별 서비스 만료일과 자산 태그를 추적합니다.</p>
+                  </div>
+                </div>
+                <div class="admin-list" id="adminWarrantyList"></div>
+              </article>
+
+              <article class="panel admin-panel">
+                <div class="panel-header compact">
+                  <div>
+                    <h2>전원 프로파일</h2>
+                    <p>랙/PDU 운영 정책과 성능/절전 모드를 정의합니다.</p>
+                  </div>
+                </div>
+                <div class="admin-list" id="adminPowerProfiles"></div>
+              </article>
+
+              <article class="panel admin-panel">
+                <div class="panel-header compact">
+                  <div>
+                    <h2>자동화 액션</h2>
+                    <p>장애, 온도, 승인, target down 이벤트에 대한 후속 조치를 정의합니다.</p>
+                  </div>
+                </div>
+                <div class="admin-list" id="adminAutomationList"></div>
+              </article>
+
+              <article class="panel admin-panel">
+                <div class="panel-header compact">
+                  <div>
+                    <h2>센서 프리뷰</h2>
+                    <p>IPMI 센서 중 운영자가 바로 볼 만한 값을 요약합니다.</p>
+                  </div>
+                </div>
+                <div class="admin-list" id="adminSensorPreview"></div>
+              </article>
+            </section>
+
+            <article class="panel admin-editor-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>관리자 고급 설정</h2>
+                  <p>OpenManage Enterprise의 기준 템플릿처럼 수명주기 관리 데이터를 JSON으로 저장합니다.</p>
+                </div>
+                <span class="badge soft" id="adminSaveStatus">Admin</span>
+              </div>
+              <form class="ops-grid" id="adminLifecycleForm">
+                <label class="ops-wide">Firmware baseline JSON<textarea id="adminFirmwareBaseline" rows="6"></textarea></label>
+                <label class="ops-wide">Warranty inventory JSON<textarea id="adminWarrantyInventory" rows="6"></textarea></label>
+                <label class="ops-wide">Power profiles JSON<textarea id="adminPowerProfileInput" rows="5"></textarea></label>
+                <label class="ops-wide">Compliance rules JSON<textarea id="adminComplianceRules" rows="5"></textarea></label>
+                <label class="ops-wide">Automation actions JSON<textarea id="adminAutomationActions" rows="5"></textarea></label>
+                <button class="primary-action" type="submit">관리자 설정 저장</button>
+              </form>
+            </article>
           </section>
         </section>
 

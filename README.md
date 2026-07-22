@@ -1,5 +1,18 @@
 # D-aquila
 
+## 관리자 콘솔 및 장비 수명주기 관리
+
+D-aquila에는 OpenManage Enterprise에서 기대하는 장비 운영 기능을 D-aquila 방식으로 통합한 관리자 콘솔이 추가되었습니다.
+
+- 자산 인벤토리: 관리 노드, GPU 노드, 장애/Drain 노드, Prometheus target down, IPMI 가시성을 요약합니다.
+- 펌웨어/드라이버 기준: BIOS, BMC/iDRAC, NVIDIA Driver, CUDA, Kernel 기준 버전을 저장하고 운영 기준으로 사용합니다.
+- 보증/서비스 관리: 서비스 태그, 벤더, 모델, 보증 만료일을 장비별로 추적합니다.
+- 전원 프로파일: Balanced, Performance, Eco 같은 랙/PDU 운영 프로파일을 정의합니다.
+- 규정 준수 점검: exporter target up, IPMI visibility, audit log retention 같은 규칙을 관리자 화면에서 확인합니다.
+- 자동화 액션: target down, temperature high, approval approved 같은 이벤트에 대해 notify, submit_if_policy_allows 같은 후속 조치를 정의합니다.
+- 관리자 고급 설정: 위 항목은 `generated/d-aquila-config.json`에 저장되며 관리자 화면에서 JSON으로 편집할 수 있습니다.
+- 관리자 권한: 수명주기 설정 저장은 `admin.manage` 권한을 가진 관리자만 수행할 수 있습니다.
+
 ## 최신 운영 기능
 
 이번 버전에는 운영 클러스터 적용을 위한 다음 기능이 포함되어 있습니다.
