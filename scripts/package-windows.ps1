@@ -31,7 +31,7 @@ $pyInstallerArgs = @(
   "--noconfirm",
   "--onedir",
   "--name", $Name,
-  "--console"
+  "--windowed"
 )
 
 foreach ($item in $addData) {

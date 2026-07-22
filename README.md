@@ -69,6 +69,22 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1
 dist\D-aquila-Windows\D-aquila-Windows.exe
 ```
 
+### Windows 설치 마법사 만들기
+
+일반 Windows 프로그램처럼 `Setup.exe`를 더블클릭해서 다음, 다음, 설치하는 배포 파일도 만들 수 있습니다. 이 방식은 Inno Setup 6이 설치된 Windows 빌드 PC에서 실행합니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\package-windows-installer.ps1 -Version 0.1.0
+```
+
+완료 후 다음 설치 파일이 생성됩니다.
+
+```text
+dist\installer\D-aquila-Windows-Setup.exe
+```
+
+사용자는 이 파일을 더블클릭해서 설치 마법사를 진행하면 됩니다. 설치 후 시작 메뉴와 선택한 경우 바탕화면 아이콘에서 D-aquila Windows Edition을 실행할 수 있습니다.
+
 - 승인 후 자동 제출 정책: 기본값은 꺼짐이며, 설정 화면의 작업 제출 정책에서 켜면 승인된 템플릿 작업을 자동으로 `sbatch` 제출합니다.
 - SMTP/Slack/Teams 알림 채널: generic webhook, Slack incoming webhook, Teams webhook, SMTP 메일 전송을 지원합니다.
 - 다중 랙 3D 배치 편집기: 노드 수에 따라 여러 랙을 자동 배치하고, 서버별 U 크기와 시작 U, PDU 용량/할당 전력을 중앙 설정으로 저장합니다.
