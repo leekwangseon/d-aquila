@@ -2207,6 +2207,13 @@ async function refreshData() {
 
   latestSummary = summary.unavailable ? null : summary;
   latestSystem = system.unavailable ? null : system;
+  const isWindowsEdition = latestSystem?.edition === "windows" || latestSummary?.edition === "windows";
+  document.body.classList.toggle("windows-edition", isWindowsEdition);
+  const submitButton = document.querySelector("#openSubmit");
+  if (submitButton) submitButton.hidden = isWindowsEdition;
+  document.querySelectorAll(".brand small").forEach((item) => {
+    item.textContent = isWindowsEdition ? "DASAN DATA Windows Server" : "DASAN DATA HPC";
+  });
   latestDiscovery = discoveryData.unavailable ? null : discoveryData;
   latestLogs = logData.unavailable ? { logs: [], summary: {}, sources: [], error: logData.error } : logData;
   latestIpmi = ipmiData.unavailable ? { targets: [], sensors: [], inlet_temperatures: [], power_readings: [], summary: {} } : ipmiData;

@@ -37,6 +37,9 @@ PROMETHEUS_URL = os.getenv("D_AQUILA_PROMETHEUS_URL", "http://localhost:9090").r
 ENABLE_SUBMIT = os.getenv("D_AQUILA_ENABLE_SUBMIT", "false").lower() in {"1", "true", "yes", "on"}
 COMMAND_TIMEOUT = int(os.getenv("D_AQUILA_COMMAND_TIMEOUT", "10"))
 AUTH_MODE = os.getenv("D_AQUILA_AUTH_MODE", "pam").lower()
+IS_WINDOWS = platform.system().lower() == "windows"
+if IS_WINDOWS and AUTH_MODE == "pam":
+    AUTH_MODE = "disabled"
 AUTH_SHADOW_FALLBACK = os.getenv("D_AQUILA_AUTH_SHADOW_FALLBACK", "true").lower() in {"1", "true", "yes", "on"}
 AUTH_SESSION_SECONDS = int(os.getenv("D_AQUILA_AUTH_SESSION_SECONDS", "28800"))
 HOST_SLURM_FALLBACK = os.getenv("D_AQUILA_HOST_SLURM_FALLBACK", "true").lower() in {"1", "true", "yes", "on"}
@@ -755,6 +758,27 @@ def human_duration(seconds: float) -> str:
 
 def read_filesystems() -> list[dict[str, Any]]:
     filesystems: list[dict[str, Any]] = []
+    if IS_WINDOWS:
+        for partition in psutil.disk_partitions(all=False):
+            if "cdrom" in partition.opts.lower():
+                continue
+            try:
+                usage = psutil.disk_usage(partition.mountpoint)
+            except (PermissionError, OSError):
+                continue
+            filesystems.append(
+                {
+                    "device": partition.device,
+                    "mountpoint": partition.mountpoint,
+                    "label": partition.device.rstrip("\\/"),
+                    "fstype": partition.fstype,
+                    "total_bytes": usage.total,
+                    "used_bytes": usage.used,
+                    "free_bytes": usage.free,
+                    "usage_percent": round(usage.percent, 1),
+                }
+            )
+        return filesystems
     host_paths = [
         ("root", "/host"),
         ("home", "/host/home"),
@@ -943,6 +967,51 @@ def read_temperature() -> dict[str, Any]:
     return {"max_celsius": hottest, "readings": readings[:20]}
 
 
+def read_nvidia_smi() -> dict[str, Any]:
+    query = "index,name,utilization.gpu,temperature.gpu,power.draw,memory.total,memory.used"
+    output, error = run_command_optional(
+        [
+            "nvidia-smi",
+            f"--query-gpu={query}",
+            "--format=csv,noheader,nounits",
+        ],
+        timeout=4,
+    )
+    if error:
+        return {"gpus": [], "summary": {"count": 0}, "error": error}
+    gpus: list[dict[str, Any]] = []
+    for line in output.splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 7:
+            continue
+        try:
+            gpus.append(
+                {
+                    "index": int(parts[0]),
+                    "name": parts[1],
+                    "utilization_percent": float(parts[2]),
+                    "temperature_celsius": float(parts[3]),
+                    "power_watts": float(parts[4]),
+                    "memory_total_mib": float(parts[5]),
+                    "memory_used_mib": float(parts[6]),
+                }
+            )
+        except ValueError:
+            continue
+    count = len(gpus)
+    return {
+        "gpus": gpus,
+        "summary": {
+            "count": count,
+            "avg_utilization_percent": round(sum(gpu["utilization_percent"] for gpu in gpus) / count, 1) if count else 0,
+            "max_temperature_celsius": max((gpu["temperature_celsius"] for gpu in gpus), default=0),
+            "total_power_watts": round(sum(gpu["power_watts"] for gpu in gpus), 1),
+            "memory_total_mib": sum(gpu["memory_total_mib"] for gpu in gpus),
+            "memory_used_mib": sum(gpu["memory_used_mib"] for gpu in gpus),
+        },
+    }
+
+
 def parse_kv_line(line: str) -> dict[str, str]:
     parsed: dict[str, str] = {}
     for match in re.finditer(r"(\w+)=(.*?)(?=\s+\w+=|$)", line.strip()):
@@ -1045,6 +1114,51 @@ def read_journal_logs(limit: int) -> tuple[list[dict[str, Any]], list[dict[str, 
                 }
             )
     return logs, sources
+
+
+def read_windows_event_logs(limit: int) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    logs: list[dict[str, Any]] = []
+    sources: list[dict[str, str]] = []
+    commands = [
+        ("system", "System"),
+        ("security", "Security"),
+        ("application", "Application"),
+    ]
+    per_log = max(20, limit // len(commands))
+    for source_name, log_name in commands:
+        script = (
+            f"Get-WinEvent -LogName {log_name} -MaxEvents {per_log} -ErrorAction Stop | "
+            "Select-Object TimeCreated, ProviderName, Id, LevelDisplayName, Message | "
+            "ConvertTo-Json -Depth 3"
+        )
+        output, error = run_command_optional(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], timeout=8)
+        sources.append({"name": source_name, "type": "windows-event-log", "status": "limited" if error else "ok", "detail": error or log_name})
+        if error or not output.strip():
+            continue
+        try:
+            payload = json.loads(output)
+        except json.JSONDecodeError:
+            continue
+        rows = payload if isinstance(payload, list) else [payload]
+        for item in rows:
+            message = str(item.get("Message") or "").strip()
+            provider = str(item.get("ProviderName") or source_name)
+            level_name = str(item.get("LevelDisplayName") or "")
+            priority = 3 if level_name.lower() in {"critical", "error"} else 4 if level_name.lower() == "warning" else 6
+            category, level = classify_log(message, provider, source_name, priority)
+            logs.append(
+                {
+                    "time": str(item.get("TimeCreated") or datetime.now().isoformat(timespec="seconds")),
+                    "source": provider,
+                    "unit": log_name,
+                    "category": "security" if source_name == "security" else category,
+                    "level": level,
+                    "priority": priority,
+                    "message": message[:2000] or f"Windows Event {item.get('Id', '')} {level_name}".strip(),
+                }
+            )
+    logs.sort(key=lambda item: item["time"], reverse=True)
+    return logs[:limit], sources
 
 
 def read_file_tail(path: Path, max_lines: int = 80) -> tuple[list[str], str | None]:
@@ -1297,6 +1411,37 @@ def health() -> dict[str, Any]:
 
 @app.get("/api/discovery")
 def discovery() -> dict[str, Any]:
+    if IS_WINDOWS:
+        gpu = read_nvidia_smi()
+        return {
+            "edition": "windows",
+            "commands": {
+                "powershell": shutil.which("powershell"),
+                "nvidia-smi": shutil.which("nvidia-smi"),
+            },
+            "slurm_config_paths": [],
+            "munge_sockets": [],
+            "prometheus": {
+                "url": "",
+                "ready": False,
+                "targets_by_job": {"windows-local": 1},
+            },
+            "submit_enabled": False,
+            "job_policy": {**default_policy(), "enabled": False},
+            "auth": {
+                "mode": AUTH_MODE,
+                "pam_available": False,
+                "shadow_fallback_enabled": False,
+                "shadow_fallback_available": False,
+                "session_seconds": AUTH_SESSION_SECONDS,
+            },
+            "runtime": {
+                "disk_path": os.getenv("D_AQUILA_DISK_PATH") or (Path.home().anchor or "C:\\"),
+                "command_timeout": COMMAND_TIMEOUT,
+                "host_slurm_fallback": False,
+                "gpu_count": gpu.get("summary", {}).get("count", 0),
+            },
+        }
     commands = {
         "sinfo": shutil.which("sinfo"),
         "squeue": shutil.which("squeue"),
@@ -1350,6 +1495,32 @@ def discovery() -> dict[str, Any]:
 
 @app.get("/api/summary")
 def summary() -> dict[str, Any]:
+    if IS_WINDOWS:
+        cpu_percent = psutil.cpu_percent(interval=0.2)
+        memory = psutil.virtual_memory()
+        gpu = read_nvidia_smi()
+        gpu_summary = gpu.get("summary", {})
+        return {
+            "cpu_alloc": 0,
+            "cpu_total": psutil.cpu_count(logical=True) or 0,
+            "slurm_cpu_total": 0,
+            "cluster_core_total": psutil.cpu_count(logical=True) or 0,
+            "cluster_memory_total_bytes": memory.total,
+            "cluster_memory_used_bytes": memory.used,
+            "cluster_memory_usage_percent": memory.percent,
+            "cpu_usage_percent": round(cpu_percent, 1),
+            "cluster_cpu_usage_percent": round(cpu_percent, 1),
+            "gpu_usage_percent": float(gpu_summary.get("avg_utilization_percent") or 0),
+            "gpu_used": sum(1 for item in gpu.get("gpus", []) if float(item.get("utilization_percent") or 0) > 0),
+            "gpu_total": int(gpu_summary.get("count") or 0),
+            "jobs_running": 0,
+            "jobs_pending": 0,
+            "max_gpu_temp_celsius": float(gpu_summary.get("max_temperature_celsius") or 0),
+            "gpu_power_watts": float(gpu_summary.get("total_power_watts") or 0),
+            "ipmi_up": 0,
+            "site": site_location(),
+            "edition": "windows",
+        }
     cpu_alloc = prom_value("sum(slurm_cpus_alloc)")
     cpu_total = prom_value("sum(slurm_cpus_total)")
     cluster_cpu_avg = prom_value('avg(100 - (rate(node_cpu_seconds_total{mode="idle"}[5m]) * 100))', -1)
@@ -1392,7 +1563,7 @@ def system_metrics() -> dict[str, Any]:
     net_b = psutil.net_io_counters()
     disk_io_b = psutil.disk_io_counters()
     memory = psutil.virtual_memory()
-    disk_path = os.getenv("D_AQUILA_DISK_PATH", "/")
+    disk_path = os.getenv("D_AQUILA_DISK_PATH") or ((Path.home().anchor or "C:\\") if IS_WINDOWS else "/")
     disk = psutil.disk_usage(disk_path)
     load_avg = os.getloadavg() if hasattr(os, "getloadavg") else (0.0, 0.0, 0.0)
     boot_timestamp = psutil.boot_time()
@@ -1402,6 +1573,7 @@ def system_metrics() -> dict[str, Any]:
     disk_read_delta = (disk_io_b.read_bytes - disk_io_a.read_bytes) if disk_io_a and disk_io_b else 0
     disk_write_delta = (disk_io_b.write_bytes - disk_io_a.write_bytes) if disk_io_a and disk_io_b else 0
     os_release = read_os_release()
+    gpu = read_nvidia_smi()
 
     return {
         "hostname": socket.gethostname(),
@@ -1454,11 +1626,25 @@ def system_metrics() -> dict[str, Any]:
             "bytes_sent": net_b.bytes_sent,
         },
         "temperature": read_temperature(),
+        "gpu": gpu,
+        "edition": "windows" if IS_WINDOWS else "cluster",
     }
 
 
 @app.get("/api/targets")
 def targets() -> dict[str, Any]:
+    if IS_WINDOWS:
+        return {
+            "targets": [
+                {
+                    "job": "windows-local",
+                    "instance": socket.gethostname(),
+                    "health": "up",
+                    "lastError": "",
+                    "scrapeUrl": "local psutil / Windows APIs",
+                }
+            ]
+        }
     data = prometheus("/api/v1/targets")
     active = data.get("activeTargets", [])
     return {
@@ -1477,6 +1663,38 @@ def targets() -> dict[str, Any]:
 
 @app.get("/api/ipmi")
 def ipmi_details() -> dict[str, Any]:
+    if IS_WINDOWS:
+        gpu = read_nvidia_smi()
+        sensors = [
+            {
+                "instance": socket.gethostname(),
+                "name": f"GPU {item['index']} {item['name']} temperature",
+                "type": "gpu_temperature",
+                "value": item["temperature_celsius"],
+            }
+            for item in gpu.get("gpus", [])
+        ]
+        power = [
+            {
+                "instance": socket.gethostname(),
+                "name": f"GPU {item['index']} {item['name']} power",
+                "type": "gpu_power",
+                "value": item["power_watts"],
+            }
+            for item in gpu.get("gpus", [])
+        ]
+        return {
+            "targets": [],
+            "sensors": [*sensors, *power],
+            "inlet_temperatures": [],
+            "power_readings": power,
+            "summary": {
+                "targets": 0,
+                "up": 0,
+                "inlet_max": None,
+                "power_sum": sum(item["value"] for item in power),
+            },
+        }
     targets_data = {"targets": []}
     try:
         targets_data = targets()
@@ -1525,8 +1743,12 @@ def ipmi_details() -> dict[str, Any]:
 @app.get("/api/logs")
 def logs(limit: int = 180) -> dict[str, Any]:
     safe_limit = max(20, min(limit, 500))
-    journal_logs, journal_sources = read_journal_logs(safe_limit)
-    file_logs, file_sources = read_file_logs(safe_limit)
+    if IS_WINDOWS:
+        journal_logs, journal_sources = read_windows_event_logs(safe_limit)
+        file_logs, file_sources = [], []
+    else:
+        journal_logs, journal_sources = read_journal_logs(safe_limit)
+        file_logs, file_sources = read_file_logs(safe_limit)
     combined = journal_logs + file_logs
     combined.sort(key=lambda item: item.get("time", ""), reverse=True)
     combined = combined[:safe_limit]
@@ -1580,6 +1802,8 @@ def partitions() -> dict[str, Any]:
 
 @app.get("/api/jobs")
 def jobs(user: str | None = None, state: str | None = None) -> dict[str, Any]:
+    if IS_WINDOWS:
+        return {"jobs": [], "edition": "windows", "message": "Slurm is not used in D-aquila Windows Edition."}
     fmt = "%i|%j|%t|%u|%g|%P|%q|%D|%R|%c|%b|%l|%L|%Q"
     output = run_command(["squeue", "-h", "-o", fmt])
     rows = []
@@ -1620,6 +1844,36 @@ def jobs(user: str | None = None, state: str | None = None) -> dict[str, Any]:
 
 @app.get("/api/nodes")
 def nodes() -> dict[str, Any]:
+    if IS_WINDOWS:
+        memory = psutil.virtual_memory()
+        gpu = read_nvidia_smi()
+        gpu_summary = gpu.get("summary", {})
+        return {
+            "nodes": [
+                {
+                    "name": socket.gethostname(),
+                    "addr": local_ip() or "",
+                    "hostname": socket.gethostname(),
+                    "state": "MONITORED",
+                    "slurm_state": "WINDOWS_LOCAL",
+                    "partitions": "windows-standalone",
+                    "gres": "gpu" if gpu_summary.get("count") else "",
+                    "cpu_alloc": 0,
+                    "cpu_total": psutil.cpu_count(logical=True) or 0,
+                    "cpu_load": psutil.cpu_percent(interval=0.1),
+                    "cpu_usage_percent": psutil.cpu_percent(interval=0.1),
+                    "memory_usage_percent": round(memory.percent, 1),
+                    "mem_total_mb": int(memory.total / 1024 / 1024),
+                    "mem_free_mb": int(memory.available / 1024 / 1024),
+                    "gpu_total": int(gpu_summary.get("count") or 0),
+                    "gpu_alloc": sum(1 for item in gpu.get("gpus", []) if float(item.get("utilization_percent") or 0) > 0),
+                    "reason": "D-aquila Windows Edition local server",
+                    "boot_time": datetime.fromtimestamp(psutil.boot_time()).isoformat(timespec="seconds"),
+                    "slurmd_start_time": "",
+                }
+            ],
+            "edition": "windows",
+        }
     output = run_command(["scontrol", "show", "node", "-o"])
     rows = []
     exporter_usage = node_exporter_usage_by_name()

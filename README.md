@@ -18,6 +18,57 @@ D-aquila에는 OpenManage Enterprise에서 기대하는 장비 운영 기능을 
 
 이번 버전에는 운영 클러스터 적용을 위한 다음 기능이 포함되어 있습니다.
 
+## D-aquila Windows Edition
+
+Windows 서버 단독 관제를 위한 Windows Edition을 제공합니다. 이 모드는 Slurm 클러스터 관리가 아니라, Windows 서버에 직접 설치해서 해당 서버의 자원을 확인하는 용도입니다.
+
+### Windows Edition에서 수집하는 항목
+
+- CPU 사용률, 코어 수, 부팅 시간, 업타임
+- 메모리 사용률, 사용량, 가용량
+- 디스크 사용률, 파일시스템/드라이브별 용량
+- 디스크 I/O, 네트워크 송수신량
+- NVIDIA GPU가 있는 경우 `nvidia-smi` 기반 GPU 사용률, 온도, 전력, GPU 메모리
+- Windows Event Log 기반 System, Security, Application 로그
+- Windows 서버 1대를 로컬 노드로 표시하는 단독 서버 노드 뷰
+
+### Windows 설치
+
+관리자 PowerShell에서 실행합니다.
+
+```powershell
+cd C:\path\to\d-aquila
+powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -OpenFirewall -CreateDesktopShortcut
+```
+
+설치 후 실행:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start-windows.ps1 -Port 8000
+```
+
+브라우저에서 접속:
+
+```text
+http://localhost:8000
+```
+
+Windows Edition은 기본적으로 `D_AQUILA_AUTH_MODE=disabled`로 로컬 실행됩니다. 외부 사용자에게 공개하는 환경에서는 방화벽, VPN, 리버스 프록시 인증, Windows 서비스 계정 정책을 별도로 적용해야 합니다.
+
+### Windows 실행 파일 패키징
+
+납품용 Windows 서버에서 Python 실행 명령 대신 실행 파일 형태가 필요하면 PyInstaller 패키징 스크립트를 사용할 수 있습니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1
+```
+
+완료 후 다음 실행 파일이 생성됩니다.
+
+```text
+dist\D-aquila-Windows\D-aquila-Windows.exe
+```
+
 - 승인 후 자동 제출 정책: 기본값은 꺼짐이며, 설정 화면의 작업 제출 정책에서 켜면 승인된 템플릿 작업을 자동으로 `sbatch` 제출합니다.
 - SMTP/Slack/Teams 알림 채널: generic webhook, Slack incoming webhook, Teams webhook, SMTP 메일 전송을 지원합니다.
 - 다중 랙 3D 배치 편집기: 노드 수에 따라 여러 랙을 자동 배치하고, 서버별 U 크기와 시작 U, PDU 용량/할당 전력을 중앙 설정으로 저장합니다.
