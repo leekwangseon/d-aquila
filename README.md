@@ -1,5 +1,13 @@
 # D-aquila
 
+## Windows 설치 파일 다운로드
+
+Windows 서버에서 바로 설치하려면 GitHub Releases에서 설치 파일을 다운로드하세요.
+
+[D-aquila-Windows-Setup.exe 다운로드](https://github.com/leekwangseon/d-aquila/releases/latest/download/D-aquila-Windows-Setup.exe)
+
+다운로드한 EXE 파일을 더블클릭하면 설치 마법사가 열리고, 설치 완료 후 D-aquila Windows Edition이 자동으로 실행됩니다.
+
 ## Windows 단일 설치 파일 배포
 
 최종 사용자는 GitHub Releases에서 `D-aquila-Windows-Setup.exe` 파일 하나만 다운로드하면 됩니다.
