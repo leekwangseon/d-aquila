@@ -16,6 +16,7 @@ import uvicorn
 APP_NAME = "D-aquila Windows Edition"
 EXE_NAME = "D-aquila-Windows.exe"
 DEFAULT_PORT = 8000
+DEVNULL_HANDLE = None
 
 
 def default_install_dir() -> Path:
@@ -36,14 +37,26 @@ def open_browser(port: int) -> None:
     webbrowser.open(f"http://localhost:{port}")
 
 
+def ensure_console_streams() -> None:
+    global DEVNULL_HANDLE
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    DEVNULL_HANDLE = open(os.devnull, "w", encoding="utf-8")
+    if sys.stdout is None:
+        sys.stdout = DEVNULL_HANDLE
+    if sys.stderr is None:
+        sys.stderr = DEVNULL_HANDLE
+
+
 def run_app(port: int = DEFAULT_PORT, host: str = "127.0.0.1") -> None:
+    ensure_console_streams()
     os.environ.setdefault("D_AQUILA_AUTH_MODE", "disabled")
     os.environ.setdefault("D_AQUILA_ENABLE_SUBMIT", "false")
     os.environ.setdefault("D_AQUILA_HOST_SLURM_FALLBACK", "false")
     os.environ.setdefault("D_AQUILA_PORT", str(port))
     os.environ.setdefault("D_AQUILA_HOST", host)
     threading.Thread(target=open_browser, args=(port,), daemon=True).start()
-    uvicorn.run("backend.d_aquila:app", host=host, port=port, log_level="warning")
+    uvicorn.run("backend.d_aquila:app", host=host, port=port, log_config=None, access_log=False)
 
 
 def run_powershell(script: str) -> None:
@@ -169,7 +182,12 @@ def run_installer_gui() -> None:
             target = install_app(Path(install_dir.get()), desktop_shortcut.get(), start_menu_shortcut.get())
             status.set("설치가 완료되었습니다.")
             if launch_after_install.get():
-                subprocess.Popen([str(target), "--run"], cwd=str(target.parent))
+                subprocess.Popen(
+                    [str(target), "--run"],
+                    cwd=str(target.parent),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
             messagebox.showinfo(APP_NAME, "D-aquila Windows Edition 설치가 완료되었습니다.")
             root.destroy()
         except Exception as exc:
