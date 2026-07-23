@@ -56,7 +56,9 @@ def run_app(port: int = DEFAULT_PORT, host: str = "127.0.0.1") -> None:
     os.environ.setdefault("D_AQUILA_PORT", str(port))
     os.environ.setdefault("D_AQUILA_HOST", host)
     threading.Thread(target=open_browser, args=(port,), daemon=True).start()
-    uvicorn.run("backend.d_aquila:app", host=host, port=port, log_config=None, access_log=False)
+    from backend.d_aquila import app
+
+    uvicorn.run(app, host=host, port=port, log_config=None, access_log=False)
 
 
 def run_powershell(script: str) -> None:

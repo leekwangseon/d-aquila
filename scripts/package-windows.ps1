@@ -31,7 +31,13 @@ $pyInstallerArgs = @(
   "--noconfirm",
   "--onedir",
   "--name", $Name,
-  "--windowed"
+  "--windowed",
+  "--hidden-import", "backend.d_aquila",
+  "--hidden-import", "psutil",
+  "--hidden-import", "fastapi",
+  "--hidden-import", "pydantic",
+  "--hidden-import", "uvicorn",
+  "--collect-all", "psutil"
 )
 
 foreach ($item in $addData) {
