@@ -631,6 +631,17 @@ def me(d_aquila_session: str | None = Cookie(default=None, alias=SESSION_COOKIE)
 SLURM_COMMANDS = {"sinfo", "squeue", "scontrol", "sbatch", "scancel"}
 
 
+def hidden_subprocess_kwargs() -> dict[str, Any]:
+    if not IS_WINDOWS:
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    return {
+        "creationflags": subprocess.CREATE_NO_WINDOW,
+        "startupinfo": startupinfo,
+    }
+
+
 def run_subprocess(args: list[str], timeout: int | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         args,
@@ -638,6 +649,7 @@ def run_subprocess(args: list[str], timeout: int | None = None) -> subprocess.Co
         text=True,
         capture_output=True,
         timeout=timeout or COMMAND_TIMEOUT,
+        **hidden_subprocess_kwargs(),
     )
 
 
@@ -698,6 +710,7 @@ def run_command_optional(args: list[str], timeout: int | None = None) -> tuple[s
             text=True,
             capture_output=True,
             timeout=timeout or COMMAND_TIMEOUT,
+            **hidden_subprocess_kwargs(),
         )
     except FileNotFoundError:
         return "", f"Command not found: {args[0]}"
